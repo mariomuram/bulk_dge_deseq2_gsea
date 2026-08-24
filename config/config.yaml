@@ -1,43 +1,8 @@
-# DESeq2 Contrasts Configuration
-designs:
-  main:
-    formula: "~condition"
-    contrasts:
-      GATA2_dox_vs_nodox:
-        numerator: "GATA2R396Q_dox"
-        denominator: "GATA2R396Q_nodox"
-      parental_dox_vs_nodox:
-        numerator: "parental_dox"
-        denominator: "parental_nodox"
-      GATA2_dox_vs_parental_nodox:
-        numerator: "GATA2R396Q_dox"
-        denominator: "parental_nodox"
-      GATA2_nodox_vs_parental_nodox:
-        numerator: "GATA2R396Q_nodox"
-        denominator: "parental_nodox"
-  # interaction:
-  #   formula: "~background + dox + background:dox"
-  #   contrasts:
-  #     GATA2_specific_response:
-  #       type: "interaction"
-  #       term: "backgroundGATA2R396Q.doxdox"  # placeholder, TBD later
-
-# DESeq2 Parameters
-deseq2:
-  padj_threshold: 0.05
-  log2fc_threshold: 1.0
-
-# GSEA Parameters
-gsea:
-  database: "GO"
-  ontology: "BP"
-  min_set_size: 5
-  max_set_size: 500
-  padj_threshold: 0.05
-  ranking_stat: "stat"
-
-# Output Directory
-output_dir: "results"
+# Sample label parsing
+# Each value in `samples:` below is parsed against this pattern
+# to derive the design's factor columns. Field names in {} must
+# match design.formula and design.reference_levels exactly.
+sample_label_pattern: "{background}_{dox}"
 
 # Sample Information (for reproducibility)
 samples:
@@ -51,3 +16,58 @@ samples:
   iHSC_GATA2R396Q_dCas9rtTA_lib15_2: "GATA2R396Q_nodox"
   iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
   iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
+
+# One shared design/fit for every contrast below. Interaction
+# term makes both pairwise and combination contrasts extractable
+# from this single fit via group-averaged model-matrix contrasts.
+design:
+  formula: "~background + dox + background:dox"
+  reference_levels:
+    background: "parental"
+    dox: "nodox"
+    # Any field omitted here defaults to its lexicographically
+    # smallest observed value (resolved in the Snakefile).
+    # This choice is cosmetic only -- it affects resultsNames()
+    # labels for manual/interactive use, not any contrast value
+    # computed by this workflow.
+
+# Contrasts: either `numerator`/`denominator` (sugar for a
+# two-group {numerator: 1, denominator: -1} contrast) or an
+# explicit `groups` dict of condition -> weight for anything
+# else (interaction terms, simple effects, etc).
+contrasts:
+  GATA2_dox_vs_nodox:
+    numerator: "GATA2R396Q_dox"
+    denominator: "GATA2R396Q_nodox"
+  CBi08_dox_vs_nodox:
+    numerator: "parental_dox"
+    denominator: "parental_nodox"
+  GATA2_dox_vs_CBi08_nodox:
+    numerator: "GATA2R396Q_dox"
+    denominator: "parental_nodox"
+  GATA2_nodox_vs_CBi08_nodox:
+    numerator: "GATA2R396Q_nodox"
+    denominator: "parental_nodox"
+  GATA2_specific_response:
+    groups:
+      GATA2R396Q_dox: 1
+      GATA2R396Q_nodox: -1
+      parental_dox: -1
+      parental_nodox: 1
+
+# DESeq2 Parameters
+deseq2:
+  padj_threshold: 0.05
+  log2fc_threshold: 0.0
+
+# GSEA Parameters
+gsea:
+  database: "GO"
+  ontology: "BP"
+  min_set_size: 5
+  max_set_size: 500
+  padj_threshold: 0.05
+  ranking_stat: "stat"
+
+# Output Directory
+output_dir: "results"

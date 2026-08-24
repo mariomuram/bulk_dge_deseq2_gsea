@@ -1,5 +1,6 @@
 #conda: "envs/base.yaml"
 
+import re
 import pandas as pd
 import yaml
 from pathlib import Path
@@ -9,36 +10,102 @@ configfile: "config/config.yaml"
 
 OUTPUT_DIR = config["output_dir"]
 SAMPLES_INFO = config["samples"]
-DESIGNS = config["designs"]
-DESIGN_NAMES = list(DESIGNS.keys())
+DESIGN = config["design"]
+DESIGN_FORMULA = DESIGN["formula"]
 
-# Flatten contrasts across designs, tracking provenance so a
-# contrast result can be traced back to the dds fit it needs.
-CONTRAST_TO_DESIGN = {}
-for design_name, design in DESIGNS.items():
-  for contrast_name in design["contrasts"]:
-    if contrast_name in CONTRAST_TO_DESIGN:
-      other = CONTRAST_TO_DESIGN[contrast_name]
-      raise ValueError(
-        f"Contrast '{contrast_name}' is defined in both designs "
-        f"'{other}' and '{design_name}'. Contrast names must be "
-        "unique across all designs."
-      )
-    CONTRAST_TO_DESIGN[contrast_name] = design_name
+# TODO: Consider replacing by `parse`:
+def compile_label_pattern(pattern):
+  """Turn '{background}_{dox}' into a regex with one named
+  group per field, without relying on escaping/substring
+  tricks that could collide with pattern literals."""
+  parts = re.split(r"(\{[A-Za-z_]\w*\})", pattern)
+  regex_src, field_names = "", []
+  for part in parts:
+    m = re.fullmatch(r"\{([A-Za-z_]\w*)\}", part)
+    if m:
+      field_names.append(m.group(1))
+      regex_src += f"(?P<{m.group(1)}>.+)"
+    else:
+      regex_src += re.escape(part)
+  return re.compile("^" + regex_src + "$"), field_names
 
-CONTRAST_NAMES = list(CONTRAST_TO_DESIGN.keys())
+LABEL_PATTERN = config["sample_label_pattern"]
+LABEL_REGEX, FIELD_NAMES = compile_label_pattern(LABEL_PATTERN)
+
+# --- Parse every sample label into its fields -----------------------
+
+SAMPLE_FIELDS = {}
+for sample, label in SAMPLES_INFO.items():
+  m = LABEL_REGEX.match(label)
+  if m is None:
+    raise ValueError(
+      f"Sample '{sample}' has label '{label}', which does not "
+      f"match sample_label_pattern '{LABEL_PATTERN}'."
+    )
+  fields = m.groupdict()
+  reconstructed = LABEL_PATTERN.format(**fields)
+  if reconstructed != label:
+    raise ValueError(
+      f"Sample '{sample}': parsing '{label}' with pattern "
+      f"'{LABEL_PATTERN}' gave fields {fields}, which do not "
+      f"reconstruct the original label ('{reconstructed}'). "
+      "A field value likely contains the pattern's own "
+      "separator; check for an ambiguous split."
+    )
+  SAMPLE_FIELDS[sample] = fields
+
+# --- Validate design.formula only references parsed fields ----------
+
+formula_tokens = set(re.findall(r"[A-Za-z_]\w*", DESIGN_FORMULA))
+unknown_fields = formula_tokens - set(FIELD_NAMES)
+if unknown_fields:
+  raise ValueError(
+    f"design.formula references field(s) not produced by "
+    f"sample_label_pattern: {sorted(unknown_fields)}. Parsed "
+    f"fields are: {FIELD_NAMES}."
+  )
+
+# --- Validate reference_levels field names, then resolve defaults ---
+
+configured_ref_levels = DESIGN.get("reference_levels", {})
+unknown_ref_fields = set(configured_ref_levels) - set(FIELD_NAMES)
+if unknown_ref_fields:
+  raise ValueError(
+    f"design.reference_levels references field(s) not produced "
+    f"by sample_label_pattern: {sorted(unknown_ref_fields)}."
+  )
+
+REFERENCE_LEVELS = {}
+for field in sorted(formula_tokens):
+  observed = sorted({v[field] for v in SAMPLE_FIELDS.values()})
+  REFERENCE_LEVELS[field] = configured_ref_levels.get(field, observed[0])
+
+# --- Resolve contrasts: numerator/denominator sugar -> groups -------
+
+ALL_CONDITIONS = set(SAMPLES_INFO.values())
+CONTRASTS = {}
+for name, spec in config["contrasts"].items():
+  groups = spec["groups"] if "groups" in spec else {
+    spec["numerator"]: 1, spec["denominator"]: -1
+  }
+  unknown = set(groups) - ALL_CONDITIONS
+  if unknown:
+    raise ValueError(
+      f"Contrast '{name}' references condition(s) not present "
+      f"in config.yaml 'samples': {sorted(unknown)}. Available: "
+      f"{sorted(ALL_CONDITIONS)}."
+    )
+  CONTRASTS[name] = groups
+
+CONTRAST_NAMES = list(CONTRASTS.keys())
 
 wildcard_constraints:
-  design = "|".join(re.escape(d) for d in DESIGN_NAMES),
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
 
 rule all:
   input:
     # DESeq2 results
-    expand(
-      f"{OUTPUT_DIR}/deseq2/dds_object_{{design}}.rds",
-      design=DESIGN_NAMES
-    ),
+    f"{OUTPUT_DIR}/deseq2/dds_object.rds",
     expand(
       f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
       contrast=CONTRAST_NAMES
@@ -64,25 +131,18 @@ rule deseq2_fit:
   input: counts = "data/quantification/star_rsem/rsem.merged.gene_counts.tsv",
   params:
     samples_info = SAMPLES_INFO,
-    design_formula = lambda wc: DESIGNS[wc.design]["formula"],
-  output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object_{{design}}.rds",
-  log: f"{OUTPUT_DIR}/logs/deseq2_fit_{{design}}.log"
+    design_formula = DESIGN_FORMULA,
+    sample_fields = SAMPLE_FIELDS,
+    reference_levels = REFERENCE_LEVELS,
+  output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
+  log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
   conda: "envs/deseq2.yaml"
   script: "scripts/deseq2_fit.R"
 
-def _dds_for_design(design):
-  return f"{OUTPUT_DIR}/deseq2/dds_object_{design}.rds"
-
-def _dds_for_contrast(wildcards):
-  design = CONTRAST_TO_DESIGN[wildcards.contrast]
-  return _dds_for_design(design)
-
 rule deseq2_contrast:
-  input: dds_rds = _dds_for_contrast,
+  input: dds_rds = rules.deseq2_fit.output.dds_rds,
   params:
-    contrast = lambda wc: (
-      DESIGNS[CONTRAST_TO_DESIGN[wc.contrast]]["contrasts"][wc.contrast]
-    ),
+    groups = lambda wc: CONTRASTS[wc.contrast],
     padj_threshold = config["deseq2"]["padj_threshold"],
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
   output: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
@@ -90,23 +150,8 @@ rule deseq2_contrast:
   conda: "envs/deseq2.yaml"
   script: "scripts/deseq2_contrast.R"
 
-#rule qc_plots:
-#  input:
-#    dds_rds = rules.deseq2_contrast.input.dds_rds,
-#    results = rules.deseq2_contrast.output.results,
-#  params:
-#    contrast_name = "{contrast}",
-#    padj_threshold = rules.deseq2_contrast.params.padj_threshold,
-#  output:
-#    pca = f"{OUTPUT_DIR}/qc/{{contrast}}_pca.pdf",
-#    ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot.pdf",
-#    volcano = f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot.pdf",
-#  log: f"{OUTPUT_DIR}/logs/qc_{{contrast}}.log"
-#  conda: "envs/deseq2.yaml"
-#  script: "scripts/qc_plots.R"
-
 rule qc_pca:
-  input: dds_rds = _dds_for_design(DESIGN_NAMES[0]),
+  input: dds_rds = rules.deseq2_contrast.input.dds_rds,
   output: pca = f"{OUTPUT_DIR}/qc/pca.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
   conda: "envs/deseq2.yaml"

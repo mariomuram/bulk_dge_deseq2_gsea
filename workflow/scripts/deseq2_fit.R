@@ -1,13 +1,15 @@
 #!/usr/bin/env Rscript
 # DESeq2 fit: build the count matrix, run normalization,
-# dispersion estimation and model fitting for a single
-# design formula. Produces one DESeqDataSet (RDS) that all
-# contrasts belonging to this design extract results from.
+# dispersion estimation and model fitting. One shared fit
+# covers every contrast (pairwise and combination alike) via
+# group-averaged model-matrix contrasts in deseq2_contrast.R.
+# Sample fields (background, dox, ...) are parsed from labels
+# in the Snakefile using config's sample_label_pattern, not
+# hardcoded here.
 
 library(DESeq2)
 library(readr)
 
-# Capture log
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
 logfile <- file(logfile, open = "w")
@@ -23,17 +25,17 @@ cat("Reading count matrix...\n")
 counts_file <- snakemake@input[["counts"]]
 counts_df <- read_tsv(counts_file, show_col_types = FALSE)
 
-cat("Input file:", counts_file, "\n")
-cat("Dimensions:", nrow(counts_df), "genes x",
-    ncol(counts_df) - 2, "samples (raw file)\n")
-
 gene_ids <- counts_df[[1]]
 counts_matrix <- as.matrix(counts_df[, -c(1, 2)])
 rownames(counts_matrix) <- gene_ids
 
-# --- Build sample metadata ------------------------------------------
+cat("Dimensions:", nrow(counts_df), "genes x",
+    ncol(counts_matrix), "samples (raw file)\n")
 
-samples_info <- snakemake@params[["samples_info"]]
+# --- Build sample metadata (fields parsed in the Snakefile) --------
+
+samples_info <- snakemake@params[["samples_info"]]    # sample -> label
+sample_fields <- snakemake@params[["sample_fields"]]   # sample -> list
 
 missing_samples <- setdiff(names(samples_info), colnames(counts_matrix))
 if (length(missing_samples) > 0) {
@@ -50,38 +52,31 @@ cat("\nUsing", length(samples_info), "of",
 
 counts_matrix <- counts_matrix[, names(samples_info), drop = FALSE]
 
-condition_labels <- unlist(samples_info, use.names = TRUE)
-label_parts <- strsplit(condition_labels, "_", fixed = TRUE)
-
-if (any(lengths(label_parts) != 2)) {
-  bad <- names(condition_labels)[lengths(label_parts) != 2]
-  stop(
-    "ERROR: expected sample labels of the form ",
-    "'<background>_<dox status>' (e.g. 'GATA2R396Q_dox'). ",
-    "Could not parse: ", paste(bad, collapse = ", ")
-  )
-}
+field_names <- names(sample_fields[[1]])
+cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
 coldata <- data.frame(
   sample = colnames(counts_matrix),
-  condition = condition_labels[colnames(counts_matrix)],
-  background = vapply(label_parts, `[[`, character(1), 1)[
-    colnames(counts_matrix)
-  ],
-  dox = vapply(label_parts, `[[`, character(1), 2)[
-    colnames(counts_matrix)
-  ],
+  condition = unlist(samples_info)[colnames(counts_matrix)],
   stringsAsFactors = FALSE
 )
+for (f in field_names) {
+  coldata[[f]] <- vapply(
+    sample_fields[colnames(counts_matrix)],
+    function(x) x[[f]], character(1)
+  )
+}
 rownames(coldata) <- coldata$sample
 
 cat("\nSample sheet:\n")
 print(coldata)
 
-if (anyNA(coldata$condition)) {
+field_has_na <- vapply(coldata[field_names], anyNA, logical(1))
+if (anyNA(coldata$condition) || any(field_has_na)) {
   stop(
-    "ERROR: could not map all samples to a condition. ",
-    "Check config.yaml 'samples' section."
+    "ERROR: could not map all samples to their condition/",
+    "fields. Check config.yaml 'samples' and ",
+    "'sample_label_pattern'."
   )
 }
 
@@ -103,12 +98,26 @@ if (any(n_per_condition < 2)) {
   )
 }
 
-# --- Build DESeqDataSet ----------------------------------------------
+# --- Apply reference levels ------------------------------------------
+# Cosmetic only: does not affect any contrast computed via the
+# group-averaged model-matrix technique in deseq2_contrast.R.
+# Kept so resultsNames(dds) and coefficient signs "make sense"
+# for anyone loading this RDS into a fresh R session directly.
+
+reference_levels <- snakemake@params[["reference_levels"]]
+cat("\nReference levels (cosmetic; does not affect contrast\n",
+    "values computed downstream):\n")
+for (f in names(reference_levels)) {
+  ref <- reference_levels[[f]]
+  cat(" -", f, ":", ref, "\n")
+  coldata[[f]] <- relevel(factor(coldata[[f]]), ref = ref)
+}
+
+# --- Build DESeqDataSet ------------------------------------------
 
 design_formula <- as.formula(snakemake@params[["design_formula"]])
 cat("\nDesign formula:", deparse(design_formula), "\n")
 
-cat("\nCreating DESeqDataSet...\n")
 dds <- DESeqDataSetFromMatrix(
   countData = round(counts_matrix),
   colData = coldata,
@@ -137,6 +146,8 @@ dds <- tryCatch(
 
 cat("Normalization, dispersion estimation and model fitting ",
     "complete.\n")
+cat("\nModel coefficients (resultsNames):\n")
+print(resultsNames(dds))
 
 if ("betaConv" %in% colnames(mcols(dds))) {
   n_not_converged <- sum(!mcols(dds)$betaConv, na.rm = TRUE)
@@ -163,7 +174,7 @@ if ("dispOutlier" %in% colnames(mcols(dds))) {
   }
 }
 
-# --- Save --------------------------------------------------------------
+# --- Save --------------------------------------------------------
 
 output_dds <- snakemake@output[["dds_rds"]]
 dir.create(dirname(output_dds), showWarnings = FALSE, recursive = TRUE)
