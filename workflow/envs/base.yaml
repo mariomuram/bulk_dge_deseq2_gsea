@@ -1,0 +1,7 @@
+name: rnaseq-base
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - pandas
+  - pyyaml

@@ -1,0 +1,53 @@
+# DESeq2 Contrasts Configuration
+designs:
+  main:
+    formula: "~condition"
+    contrasts:
+      GATA2_dox_vs_nodox:
+        numerator: "GATA2R396Q_dox"
+        denominator: "GATA2R396Q_nodox"
+      parental_dox_vs_nodox:
+        numerator: "parental_dox"
+        denominator: "parental_nodox"
+      GATA2_dox_vs_parental_nodox:
+        numerator: "GATA2R396Q_dox"
+        denominator: "parental_nodox"
+      GATA2_nodox_vs_parental_nodox:
+        numerator: "GATA2R396Q_nodox"
+        denominator: "parental_nodox"
+  # interaction:
+  #   formula: "~background + dox + background:dox"
+  #   contrasts:
+  #     GATA2_specific_response:
+  #       type: "interaction"
+  #       term: "backgroundGATA2R396Q.doxdox"  # placeholder, TBD later
+
+# DESeq2 Parameters
+deseq2:
+  padj_threshold: 0.05
+  log2fc_threshold: 1.0
+
+# GSEA Parameters
+gsea:
+  database: "GO"
+  ontology: "BP"
+  min_set_size: 5
+  max_set_size: 500
+  padj_threshold: 0.05
+  ranking_stat: "stat"
+
+# Output Directory
+output_dir: "results"
+
+# Sample Information (for reproducibility)
+samples:
+#  iHSC_CBi08_1: "parental_clean"
+#  iHSC_CBi08_2: "parental_clean"
+  iHSC_CBi08_dCas9rtTA_lib15_1: "parental_nodox"
+  iHSC_CBi08_dCas9rtTA_lib15_2: "parental_nodox"
+  iHSC_CBi08_dCas9rtTA_lib15_dox_1: "parental_dox"
+  iHSC_CBi08_dCas9rtTA_lib15_dox_2: "parental_dox"
+  iHSC_GATA2R396Q_dCas9rtTA_lib15_1: "GATA2R396Q_nodox"
+  iHSC_GATA2R396Q_dCas9rtTA_lib15_2: "GATA2R396Q_nodox"
+  iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
+  iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
