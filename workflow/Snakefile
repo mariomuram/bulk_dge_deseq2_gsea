@@ -1,5 +1,6 @@
-#conda: "envs/base.yaml"
+conda: "envs/base.yaml"
 
+import parse
 import re
 import pandas as pd
 import yaml
@@ -12,37 +13,20 @@ OUTPUT_DIR = config["output_dir"]
 SAMPLES_INFO = config["samples"]
 DESIGN = config["design"]
 DESIGN_FORMULA = DESIGN["formula"]
-
-# TODO: Consider replacing by `parse`:
-def compile_label_pattern(pattern):
-  """Turn '{background}_{dox}' into a regex with one named
-  group per field, without relying on escaping/substring
-  tricks that could collide with pattern literals."""
-  parts = re.split(r"(\{[A-Za-z_]\w*\})", pattern)
-  regex_src, field_names = "", []
-  for part in parts:
-    m = re.fullmatch(r"\{([A-Za-z_]\w*)\}", part)
-    if m:
-      field_names.append(m.group(1))
-      regex_src += f"(?P<{m.group(1)}>.+)"
-    else:
-      regex_src += re.escape(part)
-  return re.compile("^" + regex_src + "$"), field_names
-
 LABEL_PATTERN = config["sample_label_pattern"]
-LABEL_REGEX, FIELD_NAMES = compile_label_pattern(LABEL_PATTERN)
 
 # --- Parse every sample label into its fields -----------------------
 
+LABEL_PARSER = parse.compile(LABEL_PATTERN)
 SAMPLE_FIELDS = {}
 for sample, label in SAMPLES_INFO.items():
-  m = LABEL_REGEX.match(label)
-  if m is None:
+  result = LABEL_PARSER.parse(label)
+  if result is None:
     raise ValueError(
       f"Sample '{sample}' has label '{label}', which does not "
       f"match sample_label_pattern '{LABEL_PATTERN}'."
     )
-  fields = m.groupdict()
+  fields = result.named
   reconstructed = LABEL_PATTERN.format(**fields)
   if reconstructed != label:
     raise ValueError(
@@ -53,6 +37,8 @@ for sample, label in SAMPLES_INFO.items():
       "separator; check for an ambiguous split."
     )
   SAMPLE_FIELDS[sample] = fields
+
+FIELD_NAMES = list(next(iter(SAMPLE_FIELDS.values())).keys())
 
 # --- Validate design.formula only references parsed fields ----------
 
