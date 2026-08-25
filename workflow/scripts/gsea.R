@@ -1,9 +1,8 @@
 #!/usr/bin/env Rscript
-# GSEA analysis (preranked) using clusterProfiler::gseGO(),
+# GSEA (preranked) using clusterProfiler::gseGO(),
 # backed by fgsea. Ranking statistic comes directly from the
 # DESeq2 results table (no reconstruction).
 
-library(org.Hs.eg.db)
 library(readr)
 library(dplyr)
 library(ggplot2)
@@ -15,7 +14,7 @@ logfile <- file(logfile, open = "w")
 sink(logfile, type = "output")
 sink(logfile, type = "message", append = TRUE)
 
-cat("=== GSEA Analysis ===\n")
+cat("=== GSEA ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 # --- Load DESeq2 results ---------------------------------------------
@@ -25,6 +24,7 @@ contrast_name <- snakemake@params[["contrast_name"]]
 gsea_config <- snakemake@params[["gsea_config"]]
 
 cat("Contrast:", contrast_name, "\n")
+cat("Analysis name:", snakemake@params[["gsea_name"]], "\n")
 cat("Database:", gsea_config$database, "\n")
 cat("Ontology:", gsea_config$ontology, "\n\n")
 
@@ -82,29 +82,65 @@ print(tail(ranking, 5))
 
 # --- Run GSEA -----------------------------------------------------
 
-cat(
-  "\nRunning gseGO (database:", gsea_config$database,
-  ", ontology:", gsea_config$ontology, ")...\n"
-)
+if (gsea_config$database == "GO") {
 
-if (gsea_config$database != "GO") {
+  library(org.Hs.eg.db)
+
   cat(
-    "WARNING: database '", gsea_config$database, "' is not ",
-    "yet implemented; running GO instead.\n", sep = ""
+    "\nRunning gseGO (database:", gsea_config$database,
+    ", ontology:", gsea_config$ontology, ")...\n"
   )
-}
+  
+  if (gsea_config$database != "GO") {
+    cat(
+      "WARNING: database '", gsea_config$database, "' is not ",
+      "yet implemented; running GO instead.\n", sep = ""
+    )
+  }
+  
+  gsea_result <- gseGO(
+    geneList = ranking,
+    OrgDb = org.Hs.eg.db,
+    keyType = "SYMBOL",
+    ont = gsea_config$ontology,
+    minGSSize = gsea_config$min_set_size,
+    maxGSSize = gsea_config$max_set_size,
+    pvalueCutoff = gsea_config$padj_threshold,
+    by = "fgsea",
+    seed = TRUE
+  )
+} else if (gsea_config$database == "HALLMARK") {
 
-gsea_result <- gseGO(
-  geneList = ranking,
-  OrgDb = org.Hs.eg.db,
-  keyType = "SYMBOL",
-  ont = gsea_config$ontology,
-  minGSSize = gsea_config$min_set_size,
-  maxGSSize = gsea_config$max_set_size,
-  pvalueCutoff = gsea_config$padj_threshold,
-  by = "fgsea",
-  seed = TRUE
-)
+  library(msigdbr)
+
+  hallmark_sets <- msigdbr(
+    species = "Homo sapiens",
+    category = "H"
+  )
+
+  hallmark_list <- split(
+    hallmark_sets$gene_symbol,
+    hallmark_sets$gs_name
+  )
+
+  gsea_result <- GSEA(
+    geneList = ranking,
+    TERM2GENE = hallmark_sets[, c("gs_name", "gene_symbol")],
+    minGSSize = gsea_config$min_set_size,
+    maxGSSize = gsea_config$max_set_size,
+    pvalueCutoff = gsea_config$padj_threshold,
+    by = "fgsea",
+    seed = TRUE
+  )
+
+} else {
+
+  stop(
+    "Unsupported database: ",
+    gsea_config$database
+  )
+
+}
 
 gsea_df_raw <- as.data.frame(gsea_result)
 
@@ -198,7 +234,7 @@ if (nrow(gsea_df) > 0) {
   )
 }
 
-cat("\n=== GSEA Analysis Complete ===\n")
+cat("\n=== GSEA Complete ===\n")
 sink(type = "message")
 sink()
 close(logfile)

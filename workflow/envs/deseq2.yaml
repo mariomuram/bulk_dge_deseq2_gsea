@@ -6,16 +6,4 @@ channels:
 dependencies:
   - r-base
   - bioconductor-deseq2
-  - bioconductor-fgsea
-  - bioconductor-clusterProfiler
-  - bioconductor-org.hs.eg.db
-  - r-ggplot2
-  - r-ggrepel
-  - r-reshape2
-  - r-dplyr
-  - r-tidyr
   - r-readr
-  - r-purrr
-  - r-rlang
-  - r-scales
-  - r-cowplot

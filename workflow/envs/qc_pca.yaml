@@ -1,0 +1,9 @@
+name: qc_pca
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - bioconductor-deseq2
+  - r-ggplot2

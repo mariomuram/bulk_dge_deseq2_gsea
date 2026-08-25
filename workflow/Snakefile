@@ -84,9 +84,11 @@ for name, spec in config["contrasts"].items():
   CONTRASTS[name] = groups
 
 CONTRAST_NAMES = list(CONTRASTS.keys())
+GSEA_NAMES = list(config["gsea"].keys())
 
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
+  gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
 rule all:
   input:
@@ -105,12 +107,12 @@ rule all:
     ),
     # GSEA results
     expand(
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_gsea.tsv.gz",
-      contrast=CONTRAST_NAMES
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+      contrast=CONTRAST_NAMES, gsea=GSEA_NAMES
     ),
     expand(
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_gsea_plot.pdf",
-      contrast=CONTRAST_NAMES
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
+      contrast=CONTRAST_NAMES, gsea=GSEA_NAMES
     ),
 
 rule deseq2_fit:
@@ -140,18 +142,8 @@ rule qc_pca:
   input: dds_rds = rules.deseq2_contrast.input.dds_rds,
   output: pca = f"{OUTPUT_DIR}/qc/pca.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
-  conda: "envs/deseq2.yaml"
+  conda: "envs/qc_pca.yaml"
   script: "scripts/qc_pca.R"
-
-rule qc_ma:
-  input: results = rules.deseq2_contrast.output.results,
-  params:
-    contrast_name = "{contrast}",
-    padj_threshold = config["deseq2"]["padj_threshold"],
-  output: ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot.pdf",
-  log: f"{OUTPUT_DIR}/logs/qc_ma_{{contrast}}.log"
-  conda: "envs/deseq2.yaml"
-  script: "scripts/qc_ma.R"
 
 rule qc_volcano:
   input: results = rules.deseq2_contrast.output.results,
@@ -161,17 +153,28 @@ rule qc_volcano:
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
   output: volcano = f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_volcano_{{contrast}}.log"
-  conda: "envs/deseq2.yaml"
+  conda: "envs/qc_volcano.yaml"
   script: "scripts/qc_volcano.R"
 
-rule gsea_analysis:
+rule qc_ma:
+  input: results = rules.deseq2_contrast.output.results,
+  params:
+    contrast_name = "{contrast}",
+    padj_threshold = config["deseq2"]["padj_threshold"],
+  output: ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot.pdf",
+  log: f"{OUTPUT_DIR}/logs/qc_ma_{{contrast}}.log"
+  conda: "envs/qc_ma.yaml"
+  script: "scripts/qc_ma.R"
+
+rule gsea:
   input: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
   params:
     contrast_name = "{contrast}",
-    gsea_config = config["gsea"],
+    gsea_name = "{gsea}",
+    gsea_config = lambda wc: config["gsea"][wc.gsea],
   output:
-    gsea_table = f"{OUTPUT_DIR}/gsea/{{contrast}}_gsea.tsv.gz",
-    gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_gsea_plot.pdf",
-  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}.log"
-  conda: "envs/deseq2.yaml"
-  script: "scripts/gsea_analysis.R"
+    gsea_table = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+    gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
+  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}.log"
+  conda: "envs/gsea.yaml"
+  script: "scripts/gsea.R"

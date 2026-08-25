@@ -1,0 +1,9 @@
+name: qc_ma
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - r-base
+  - r-ggplot2
+  - r-dplyr
+  - r-readr

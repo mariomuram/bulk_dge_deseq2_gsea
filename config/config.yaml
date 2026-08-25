@@ -62,12 +62,20 @@ deseq2:
 
 # GSEA Parameters
 gsea:
-  database: "GO"
-  ontology: "BP"
-  min_set_size: 5
-  max_set_size: 500
-  padj_threshold: 0.05
-  ranking_stat: "stat"
+  gobp:
+    database: "GO"
+    ontology: "BP"
+    min_set_size: 5
+    max_set_size: 500
+    padj_threshold: 0.05
+    ranking_stat: "stat"
+
+  hallmark:
+    database: "HALLMARK"
+    min_set_size: 5
+    max_set_size: 500
+    padj_threshold: 0.05
+    ranking_stat: "stat"
 
 # Output Directory
 output_dir: "results"

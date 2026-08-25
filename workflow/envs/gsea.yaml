@@ -1,0 +1,14 @@
+name: gsea
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - r-readr
+  - r-dplyr
+  - r-ggplot2
+  - bioconductor-clusterprofiler
+  - bioconductor-fgsea
+  - bioconductor-org.hs.eg.db
+  - r-msigdbr
