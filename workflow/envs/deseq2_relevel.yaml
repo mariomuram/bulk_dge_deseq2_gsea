@@ -1,4 +1,4 @@
-name: deseq2
+name: deseq2-relevel
 channels:
   - conda-forge
   - bioconda
@@ -6,4 +6,3 @@ channels:
 dependencies:
   - r-base
   - bioconductor-deseq2
-  - r-readr

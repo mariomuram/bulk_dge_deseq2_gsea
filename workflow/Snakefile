@@ -84,10 +84,39 @@ for name, spec in config["contrasts"].items():
   CONTRASTS[name] = groups
 
 CONTRAST_NAMES = list(CONTRASTS.keys())
+ALL_CONDITIONS = set(SAMPLES_INFO.values())
+CONTRAST_SPECS = {}
+for name, spec in config["contrasts"].items():
+  if "numerator" in spec and "denominator" in spec:
+    referenced = {spec["numerator"], spec["denominator"]}
+    contrast_type = "pairwise"
+  else:
+    referenced = set(spec["groups"])
+    contrast_type = "groups"
+
+  unknown = referenced - ALL_CONDITIONS
+  if unknown:
+    raise ValueError(
+      f"Contrast '{name}' references condition(s) not present "
+      f"in config.yaml 'samples': {sorted(unknown)}. Available: "
+      f"{sorted(ALL_CONDITIONS)}."
+    )
+  CONTRAST_SPECS[name] = {"type": contrast_type, **spec}
+
+CONTRAST_NAMES = list(CONTRAST_SPECS.keys())
+
+PAIRWISE_CONTRASTS = {
+  n: s for n, s in CONTRAST_SPECS.items() if s["type"] == "pairwise"
+}
+REFERENCE_FACTORS = sorted({
+  s["denominator"] for s in PAIRWISE_CONTRASTS.values()
+})
+
 GSEA_NAMES = list(config["gsea"].keys())
 
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
+  reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
 rule all:
@@ -124,22 +153,39 @@ rule deseq2_fit:
     reference_levels = REFERENCE_LEVELS,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
   log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
-  conda: "envs/deseq2.yaml"
+  conda: "envs/deseq2_fit.yaml"
   script: "scripts/deseq2_fit.R"
 
+def _dds_for_contrast(wildcards):
+  spec = CONTRAST_SPECS[wildcards.contrast]
+  if spec["type"] == "pairwise":
+    denom = spec["denominator"]
+    return f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{denom}.rds"
+  return rules.deseq2_fit.output.dds_rds
+
+rule deseq2_relevel:
+  input: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
+  params: reference_factor = "{reference_factor}",
+  output:
+    dds_rds =
+      f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{{reference_factor}}.rds",
+  log: f"{OUTPUT_DIR}/logs/deseq2_relevel_{{reference_factor}}.log"
+  conda: "envs/deseq2_relevel.yaml"
+  script: "scripts/deseq2_relevel.R"
+
 rule deseq2_contrast:
-  input: dds_rds = rules.deseq2_fit.output.dds_rds,
+  input: dds_rds = _dds_for_contrast,
   params:
-    groups = lambda wc: CONTRASTS[wc.contrast],
+    contrast_spec = lambda wc: CONTRAST_SPECS[wc.contrast],
     padj_threshold = config["deseq2"]["padj_threshold"],
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
   output: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
   log: f"{OUTPUT_DIR}/logs/deseq2_contrast_{{contrast}}.log"
-  conda: "envs/deseq2.yaml"
+  conda: "envs/deseq2_contrast.yaml"
   script: "scripts/deseq2_contrast.R"
 
 rule qc_pca:
-  input: dds_rds = rules.deseq2_contrast.input.dds_rds,
+  input: dds_rds = rules.deseq2_fit.output.dds_rds,
   output: pca = f"{OUTPUT_DIR}/qc/pca.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
   conda: "envs/qc_pca.yaml"

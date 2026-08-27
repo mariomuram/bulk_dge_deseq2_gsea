@@ -1,0 +1,9 @@
+name: deseq2-fit
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - r-readr
+  - bioconductor-deseq2
