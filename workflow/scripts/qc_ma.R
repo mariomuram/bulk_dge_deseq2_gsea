@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# QC: MA plot for a single contrast.
+# QC: MA plot for a single contrast, unshrunk or shrunk LFC.
 
 library(ggplot2)
 library(dplyr)
@@ -13,33 +13,55 @@ sink(logfile, type = "message", append = TRUE)
 
 cat("=== QC: MA Plot ===\n")
 contrast_name <- snakemake@params[["contrast_name"]]
+lfc_type <- snakemake@params[["lfc_type"]]  # "unshrunk" or "shrunk"
 padj_threshold <- snakemake@params[["padj_threshold"]]
 cat("Contrast:", contrast_name, "\n")
+cat("LFC type:", lfc_type, "\n")
 cat("padj threshold:", padj_threshold, "\n\n")
 
 results_df <- read_tsv(snakemake@input[["results"]], show_col_types = FALSE)
 
+lfc_col <- if (lfc_type == "shrunk") "log2FoldChange_shrunk" else "log2FoldChange"
+if (!(lfc_col %in% colnames(results_df))) {
+  stop("ERROR: column '", lfc_col, "' not found in results table.")
+}
+if (lfc_type == "shrunk" && all(is.na(results_df[[lfc_col]]))) {
+  stop(
+    "ERROR: log2FoldChange_shrunk is entirely NA for this ",
+    "contrast -- it should not have been requested as a ",
+    "shrinkable target. Check the Snakefile's ",
+    "SHRINKABLE_CONTRASTS derivation."
+  )
+}
+
 n_na <- sum(is.na(results_df$padj))
 if (n_na > 0) {
   cat(
-    "NOTE:", n_na, "gene(s) have NA padj (independent ",
-    "filtering and/or Cook's outliers); shown as ",
-    "'Not Significant' rather than dropped, so the low-count ",
+    "NOTE:", n_na, "gene(s) have NA padj (independent",
+    "filtering and/or Cook's outliers); shown as",
+    "'Not Significant' rather than dropped, so the low-count",
     "filtering funnel stays visible on the plot.\n"
   )
 }
 
 ma_df <- results_df %>%
   mutate(
+    lfc_value = .data[[lfc_col]],
     color = ifelse(
       !is.na(padj) & padj < padj_threshold,
       "Significant", "Not Significant"
     )
   )
 
+lfc_label <- if (lfc_type == "shrunk") {
+  "Log2 Fold Change (apeglm-shrunk)"
+} else {
+  "Log2 Fold Change (unshrunk MLE)"
+}
+
 ma_plot <- ggplot(
   ma_df,
-  aes(x = baseMean, y = log2FoldChange, color = color)
+  aes(x = baseMean, y = lfc_value, color = color)
 ) +
   geom_point(alpha = 0.5, size = 2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
@@ -54,9 +76,9 @@ ma_plot <- ggplot(
     legend.position = "right"
   ) +
   labs(
-    title = paste("MA Plot:", contrast_name),
+    title = paste0("MA Plot: ", contrast_name, " (", lfc_type, ")"),
     x = "Mean Expression (baseMean, log10 scale)",
-    y = "Log2 Fold Change",
+    y = lfc_label,
     color = paste0("padj < ", padj_threshold)
   )
 

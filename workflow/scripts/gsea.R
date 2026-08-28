@@ -59,8 +59,8 @@ cat(
 if (any(duplicated(results_df$gene_id))) {
   n_dup <- sum(duplicated(results_df$gene_id))
   cat(
-    "WARNING:", n_dup, "duplicate gene_id(s) found; keeping ",
-    "the entry with the largest |", stat_col, "| for each. ",
+    "WARNING:", n_dup, "duplicate gene_id(s) found; keeping",
+    "the entry with the largest |", stat_col, "| for each.",
     "fgsea requires unique gene names.\n"
   )
   results_df <- results_df %>%
@@ -93,7 +93,7 @@ if (gsea_config$database == "GO") {
   
   if (gsea_config$database != "GO") {
     cat(
-      "WARNING: database '", gsea_config$database, "' is not ",
+      "WARNING: database '", gsea_config$database, "' is not",
       "yet implemented; running GO instead.\n", sep = ""
     )
   }
@@ -146,10 +146,10 @@ gsea_df_raw <- as.data.frame(gsea_result)
 
 if (nrow(gsea_df_raw) == 0) {
   cat(
-    "WARNING: no significantly enriched pathways found ",
-    "(padj <", gsea_config$padj_threshold, "). Check gene set ",
-    "size bounds, the ranking statistic used, and whether the ",
-    "underlying DE contrast had many significant genes to ",
+    "WARNING: no significantly enriched pathways found",
+    "(padj <", gsea_config$padj_threshold, "). Check gene set",
+    "size bounds, the ranking statistic used, and whether the",
+    "underlying DE contrast had many significant genes to",
     "begin with.\n"
   )
   gsea_df <- data.frame(

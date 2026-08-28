@@ -47,7 +47,7 @@ check_replicates <- function(dds, conditions) {
   print(n_per_condition)
   if (any(n_per_condition < 2)) {
     cat(
-      "WARNING: fewer than 2 replicates for a condition used in ",
+      "WARNING: fewer than 2 replicates for a condition used in",
       "this contrast. Results may be unreliable.\n"
     )
   }
@@ -118,7 +118,20 @@ if (contrast_type == "pairwise") {
 
   check_replicates(dds, names(groups))
 
-  mod_mat <- model.matrix(design(dds), data = as.data.frame(colData(dds)))
+  # design(dds) is only a placeholder (~condition) on the
+  # primary fit -- the matrix actually used by DESeq() was a
+  # cleaned full-crossing matrix built in deseq2_fit.R and
+  # stashed here to avoid recomputing (and risking drift from)
+  # it.
+  mod_mat <- metadata(dds)[["full_model_matrix"]]
+  if (is.null(mod_mat)) {
+    stop(
+      "ERROR: metadata(dds)$full_model_matrix is missing. This ",
+      "dds does not look like it was produced by the current ",
+      "deseq2_fit.R -- was it built with an older version of ",
+      "the pipeline?"
+    )
+  }
   contrast_vec <- rep(0, ncol(mod_mat))
   names(contrast_vec) <- colnames(mod_mat)
   for (cond in names(groups)) {
@@ -129,27 +142,71 @@ if (contrast_type == "pairwise") {
   cat("\nResolved coefficient weights:\n")
   print(contrast_vec)
 
-  cat("\nExtracting results (numeric contrast vector)...\n")
-  res <- tryCatch(
-    results(
-      dds,
-      contrast = contrast_vec,
-      independentFiltering = TRUE,
-      alpha = padj_threshold
-    ),
-    error = function(e) {
-      stop("ERROR: results() failed for this contrast: ", e$message)
-    }
-  )
-
-  # apeglm shrinkage only works when these weights exactly match
-  # a single existing coefficient (weight 1 on one term, 0
-  # elsewhere) -- true for the interaction term today.
+  # Determine single-coefficient reducibility BEFORE extracting
+  # results, so that -- when reducible -- results() is called
+  # via name= rather than the generic numeric contrast vector.
+  # This matters beyond cosmetics: lfcShrink()'s own consistency
+  # check rejects a `res` built from a raw numeric contrast even
+  # when that vector is numerically identical to a single
+  # coefficient's unit vector ("'coef' should specify same
+  # coefficient as in results 'res'") -- it checks how `res` was
+  # built, not just its values. name= and a matching unit-vector
+  # contrast= produce numerically identical results() output, so
+  # this only changes res's internal provenance tag, not any
+  # extracted number.
+  #
+  # Intercept is excluded by POSITION (always column 1 for a
+  # standard, non-"~0+..." formula), not by name -- full_mat's
+  # column names now come from resultsNames(dds) (synced in
+  # deseq2_fit.R), which calls it "Intercept" with no
+  # parentheses, so a name-based check here would need to track
+  # that convention by hand for no real benefit over position.
+  if (length(resultsNames(dds)) != ncol(mod_mat)) {
+    stop(
+      "ERROR: resultsNames(dds) has ", length(resultsNames(dds)),
+      " entries but the stored full_model_matrix has ",
+      ncol(mod_mat), " columns. Positional coefficient ",
+      "resolution is unsafe here; investigate before trusting ",
+      "downstream results."
+    )
+  }
   tol <- 1e-8
   nonzero <- which(abs(contrast_vec) > tol)
   if (length(nonzero) == 1 && abs(contrast_vec[nonzero] - 1) < tol &&
-        names(contrast_vec)[nonzero] != "(Intercept)") {
-    coef_name <- names(contrast_vec)[nonzero]
+        nonzero != 1) {
+    coef_name <- resultsNames(dds)[nonzero]
+  }
+
+  if (!is.null(coef_name)) {
+    cat(
+      "\nGroups reduce to a single coefficient (", coef_name,
+      "); extracting via name= for apeglm compatibility.\n",
+      sep = ""
+    )
+    res <- tryCatch(
+      results(
+        dds,
+        name = coef_name,
+        independentFiltering = TRUE,
+        alpha = padj_threshold
+      ),
+      error = function(e) {
+        stop("ERROR: results() failed for this contrast: ", e$message)
+      }
+    )
+  } else {
+    cat("\nExtracting results (numeric contrast vector)...\n")
+    res <- tryCatch(
+      results(
+        dds,
+        contrast = contrast_vec,
+        independentFiltering = TRUE,
+        alpha = padj_threshold
+      ),
+      error = function(e) {
+        stop("ERROR: results() failed for this contrast: ", e$message)
+      }
+    )
   }
 
 } else {
@@ -170,26 +227,40 @@ n_filtered_na <- sum(is.na(res_df$padj) & !is.na(res_df$pvalue))
 if (n_outlier_na > 0) {
   cat(
     "\nNOTE:", n_outlier_na,
-    "gene(s) have NA pvalue/padj: flagged as Cook's distance ",
+    "gene(s) have NA pvalue/padj: flagged as Cook's distance",
     "outliers.\n"
   )
 }
 if (n_filtered_na > 0) {
   cat(
     "NOTE:", n_filtered_na,
-    "gene(s) have NA padj (but a pvalue): removed by ",
+    "gene(s) have NA padj (but a pvalue): removed by",
     "independent filtering of low mean-count genes.\n"
   )
 }
 
 # --- Attempt apeglm shrinkage -----------------------------------------
 
+expected_shrinkable <- isTRUE(snakemake@params[["expected_shrinkable"]])
+
 if (!is.null(coef_name)) {
   cat("\nAttempting apeglm shrinkage using coef:", coef_name, "\n")
   res_shrunk <- tryCatch(
     lfcShrink(dds, coef = coef_name, res = res, type = "apeglm"),
     error = function(e) {
-      cat("WARNING: apeglm shrinkage failed:", e$message, "\n")
+      msg <- conditionMessage(e)
+      if (expected_shrinkable) {
+        stop(
+          "ERROR: apeglm shrinkage failed for a contrast the ",
+          "Snakemake-level pre-check (SHRINKABLE_CONTRASTS) ",
+          "predicted was shrinkable (coef = '", coef_name, "'). ",
+          "This is a genuine disagreement between the Python ",
+          "pre-check and this runtime call, not an expected ",
+          "unshrinkable case -- investigate before trusting this ",
+          "run. Underlying lfcShrink() error: ", msg
+        )
+      }
+      cat("WARNING: apeglm shrinkage failed:", msg, "\n")
       NULL
     }
   )
@@ -203,10 +274,22 @@ if (!is.null(coef_name)) {
     res_df$lfcSE_shrunk <- NA_real_
   }
 } else {
+  if (expected_shrinkable) {
+    stop(
+      "ERROR: the Snakemake-level pre-check (SHRINKABLE_CONTRASTS) ",
+      "predicted this contrast's groups reduce to a single model ",
+      "coefficient, but this runtime check found no matching ",
+      "unit-weight coefficient in the resolved contrast vector ",
+      "(printed above). This is a genuine disagreement between ",
+      "the two implementations -- investigate before trusting ",
+      "this run. Compare the printed contrast_vec names against ",
+      "resultsNames(dds) from the primary fit's log."
+    )
+  }
   cat(
-    "\nWARNING: this contrast's groups are not reducible to a ",
-    "single model coefficient, so apeglm shrinkage is not ",
-    "available for it. log2FoldChange_shrunk/lfcSE_shrunk will ",
+    "\nWARNING: this contrast's groups are not reducible to a",
+    "single model coefficient, so apeglm shrinkage is not",
+    "available for it. log2FoldChange_shrunk/lfcSE_shrunk will",
     "be NA for every gene. The unshrunk log2FoldChange/stat/",
     "pvalue/padj columns are unaffected and remain fully valid.\n"
   )

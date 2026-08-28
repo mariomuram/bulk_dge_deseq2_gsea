@@ -17,11 +17,18 @@ samples:
   iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
   iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
 
-# One shared design/fit for every contrast below. Interaction
-# term makes both pairwise and combination contrasts extractable
-# from this single fit via group-averaged model-matrix contrasts.
+# The design is always the full crossing (all main effects and
+# interactions) of every parsed sample field -- built and fit
+# as an explicit model matrix in deseq2_fit.R, not a formula
+# string here. There is exactly one correct such matrix once
+# the fields and reference levels are fixed, so there is no
+# `formula` key to set: a hand-typed formula could only ever be
+# this one (if valid) or wrong (if not), and a typed formula
+# also can't express the "drop structurally-empty coefficients"
+# handling needed once fields don't form a complete factorial
+# (e.g. once 'clean' samples, with no GATA2R396Q counterpart,
+# are added back in).
 design:
-  formula: "~background + dox + background:dox"
   reference_levels:
     background: "parental"
     dox: "nodox"
@@ -31,10 +38,11 @@ design:
     # labels for manual/interactive use, not any contrast value
     # computed by this workflow.
 
-# Contrasts: either `numerator`/`denominator` (sugar for a
-# two-group {numerator: 1, denominator: -1} contrast) or an
-# explicit `groups` dict of condition -> weight for anything
-# else (interaction terms, simple effects, etc).
+# Contrasts: either `numerator`/`denominator` (extracted via a
+# dds releveled to `denominator`, see deseq2_relevel.R) or an
+# explicit `groups` dict of condition -> weight (extracted via
+# a group-averaged model-matrix contrast against the primary
+# full-crossing dds).
 contrasts:
   GATA2_dox_vs_nodox:
     numerator: "GATA2R396Q_dox"

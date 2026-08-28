@@ -43,7 +43,7 @@ colData(dds)$condition <- relevel(
 
 design(dds) <- ~condition
 
-cat("\nRerunning nbinomWaldTest() only (dispersions and size ",
+cat("\nRerunning nbinomWaldTest() only (dispersions and size",
     "factors reused from the primary fit)...\n")
 dds <- tryCatch(
   nbinomWaldTest(dds),

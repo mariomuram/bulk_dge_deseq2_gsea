@@ -5,6 +5,7 @@ import re
 import pandas as pd
 import yaml
 from pathlib import Path
+import itertools
 
 # Load configuration
 configfile: "config/config.yaml"
@@ -12,7 +13,6 @@ configfile: "config/config.yaml"
 OUTPUT_DIR = config["output_dir"]
 SAMPLES_INFO = config["samples"]
 DESIGN = config["design"]
-DESIGN_FORMULA = DESIGN["formula"]
 LABEL_PATTERN = config["sample_label_pattern"]
 
 # --- Parse every sample label into its fields -----------------------
@@ -39,32 +39,6 @@ for sample, label in SAMPLES_INFO.items():
   SAMPLE_FIELDS[sample] = fields
 
 FIELD_NAMES = list(next(iter(SAMPLE_FIELDS.values())).keys())
-
-# --- Validate design.formula only references parsed fields ----------
-
-formula_tokens = set(re.findall(r"[A-Za-z_]\w*", DESIGN_FORMULA))
-unknown_fields = formula_tokens - set(FIELD_NAMES)
-if unknown_fields:
-  raise ValueError(
-    f"design.formula references field(s) not produced by "
-    f"sample_label_pattern: {sorted(unknown_fields)}. Parsed "
-    f"fields are: {FIELD_NAMES}."
-  )
-
-# --- Validate reference_levels field names, then resolve defaults ---
-
-configured_ref_levels = DESIGN.get("reference_levels", {})
-unknown_ref_fields = set(configured_ref_levels) - set(FIELD_NAMES)
-if unknown_ref_fields:
-  raise ValueError(
-    f"design.reference_levels references field(s) not produced "
-    f"by sample_label_pattern: {sorted(unknown_ref_fields)}."
-  )
-
-REFERENCE_LEVELS = {}
-for field in sorted(formula_tokens):
-  observed = sorted({v[field] for v in SAMPLE_FIELDS.values()})
-  REFERENCE_LEVELS[field] = configured_ref_levels.get(field, observed[0])
 
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
@@ -112,43 +86,106 @@ REFERENCE_FACTORS = sorted({
   s["denominator"] for s in PAIRWISE_CONTRASTS.values()
 })
 
+configured_ref_levels = DESIGN.get("reference_levels", {})
+unknown_ref_fields = set(configured_ref_levels) - set(FIELD_NAMES)
+if unknown_ref_fields:
+  raise ValueError(
+    f"design.reference_levels references field(s) not produced "
+    f"by sample_label_pattern: {sorted(unknown_ref_fields)}."
+  )
+
+REFERENCE_LEVELS = {}
+for field in FIELD_NAMES:
+  observed = sorted({v[field] for v in SAMPLE_FIELDS.values()})
+  REFERENCE_LEVELS[field] = configured_ref_levels.get(field, observed[0])
+
+# --- Which coefficients actually exist, given the observed ------
+# --- (possibly incomplete) factorial. ----------------------------
+
+CONDITION_FIELDS = {
+  cond: SAMPLE_FIELDS[sample] for sample, cond in SAMPLES_INFO.items()
+}
+
+def group_for(assignment):
+  for cond, fields in CONDITION_FIELDS.items():
+    if all(fields[f] == assignment[f] for f in FIELD_NAMES):
+      return cond
+  return None
+
+def canonical_patterns():
+  patterns = []
+  for r in range(1, len(FIELD_NAMES) + 1):
+    for term in itertools.combinations(FIELD_NAMES, r):
+      non_ref_levels = {
+        f: [v for v in sorted({fl[f] for fl in CONDITION_FIELDS.values()})
+            if v != REFERENCE_LEVELS[f]]
+        for f in term
+      }
+      for combo in itertools.product(*non_ref_levels.values()):
+        chosen = dict(zip(term, combo))
+        pattern, complete = {}, True
+        for corner in itertools.product([False, True], repeat=len(term)):
+          assignment = dict(REFERENCE_LEVELS)
+          for f, at_chosen in zip(term, corner):
+            assignment[f] = chosen[f] if at_chosen else REFERENCE_LEVELS[f]
+          cond = group_for(assignment)
+          if cond is None:
+            complete = False
+            break
+          sign = (-1) ** (len(term) - sum(corner))
+          pattern[cond] = pattern.get(cond, 0) + sign
+        if complete:
+          patterns.append(pattern)
+  return patterns
+
+_CANONICAL_PATTERNS = canonical_patterns()
+
+def contrast_is_shrinkable(spec):
+  if spec["type"] == "pairwise":
+    return True
+  return spec["groups"] in _CANONICAL_PATTERNS
+
+SHRINKABLE_CONTRASTS = [
+  name for name, spec in CONTRAST_SPECS.items()
+  if contrast_is_shrinkable(spec)
+]
+
 GSEA_NAMES = list(config["gsea"].keys())
+
 
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
   reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
+  lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
+
 
 rule all:
   input:
     # DESeq2 results
     f"{OUTPUT_DIR}/deseq2/dds_object.rds",
-    expand(
-      f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
-      contrast=CONTRAST_NAMES
-    ),
+    expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
+           contrast=CONTRAST_NAMES),
     # QC plots
     f"{OUTPUT_DIR}/qc/pca.pdf",
-    expand(
-      f"{OUTPUT_DIR}/qc/{{contrast}}_{{plot}}.pdf",
-      contrast=CONTRAST_NAMES,
-      plot=["ma_plot", "volcano_plot"]
-    ),
+    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_unshrunk.pdf",
+           contrast=CONTRAST_NAMES),
+    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_unshrunk.pdf",
+           contrast=CONTRAST_NAMES),
+    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_shrunk.pdf",
+           contrast=SHRINKABLE_CONTRASTS),
+    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_shrunk.pdf",
+           contrast=SHRINKABLE_CONTRASTS),
     # GSEA results
-    expand(
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
-      contrast=CONTRAST_NAMES, gsea=GSEA_NAMES
-    ),
-    expand(
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
-      contrast=CONTRAST_NAMES, gsea=GSEA_NAMES
-    ),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
+           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
 
 rule deseq2_fit:
   input: counts = "data/quantification/star_rsem/rsem.merged.gene_counts.tsv",
   params:
     samples_info = SAMPLES_INFO,
-    design_formula = DESIGN_FORMULA,
     sample_fields = SAMPLE_FIELDS,
     reference_levels = REFERENCE_LEVELS,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
@@ -179,6 +216,7 @@ rule deseq2_contrast:
     contrast_spec = lambda wc: CONTRAST_SPECS[wc.contrast],
     padj_threshold = config["deseq2"]["padj_threshold"],
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
+    expected_shrinkable = lambda wc: wc.contrast in SHRINKABLE_CONTRASTS,
   output: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
   log: f"{OUTPUT_DIR}/logs/deseq2_contrast_{{contrast}}.log"
   conda: "envs/deseq2_contrast.yaml"
@@ -195,10 +233,12 @@ rule qc_volcano:
   input: results = rules.deseq2_contrast.output.results,
   params:
     contrast_name = "{contrast}",
+    lfc_type = "{lfc_type}",
     padj_threshold = config["deseq2"]["padj_threshold"],
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
-  output: volcano = f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot.pdf",
-  log: f"{OUTPUT_DIR}/logs/qc_volcano_{{contrast}}.log"
+  output:
+    volcano = f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_{{lfc_type}}.pdf",
+  log: f"{OUTPUT_DIR}/logs/qc_volcano_{{contrast}}_{{lfc_type}}.log"
   conda: "envs/qc_volcano.yaml"
   script: "scripts/qc_volcano.R"
 
@@ -206,9 +246,10 @@ rule qc_ma:
   input: results = rules.deseq2_contrast.output.results,
   params:
     contrast_name = "{contrast}",
+    lfc_type = "{lfc_type}",
     padj_threshold = config["deseq2"]["padj_threshold"],
-  output: ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot.pdf",
-  log: f"{OUTPUT_DIR}/logs/qc_ma_{{contrast}}.log"
+  output: ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_{{lfc_type}}.pdf",
+  log: f"{OUTPUT_DIR}/logs/qc_ma_{{contrast}}_{{lfc_type}}.log"
   conda: "envs/qc_ma.yaml"
   script: "scripts/qc_ma.R"
 
