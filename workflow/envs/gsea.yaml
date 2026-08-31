@@ -10,5 +10,8 @@ dependencies:
   - r-ggplot2
   - bioconductor-clusterprofiler
   - bioconductor-fgsea
+  - bioconductor-gosemsim
   - bioconductor-org.hs.eg.db
   - r-msigdbr
+  - bioconductor-enrichplot
+  - r-ggridges   # enrichplot::ridgeplot's plotting backend

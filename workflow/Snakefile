@@ -179,8 +179,9 @@ rule all:
     # GSEA results
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
-           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
+           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
+           plot = { "plot", "ridge_plot" }),
 
 rule deseq2_fit:
   input: counts = "data/quantification/star_rsem/rsem.merged.gene_counts.tsv",
@@ -262,6 +263,8 @@ rule gsea:
   output:
     gsea_table = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
     gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
+    gsea_ridge_plot =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}.log"
   conda: "envs/gsea.yaml"
   script: "scripts/gsea.R"

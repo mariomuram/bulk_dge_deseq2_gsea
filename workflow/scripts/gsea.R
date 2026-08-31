@@ -7,10 +7,12 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(clusterProfiler)
+library(enrichplot)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
 logfile <- file(logfile, open = "w")
+
 sink(logfile, type = "output")
 sink(logfile, type = "message", append = TRUE)
 
@@ -29,6 +31,7 @@ cat("Database:", gsea_config$database, "\n")
 cat("Ontology:", gsea_config$ontology, "\n\n")
 
 stat_col <- gsea_config$ranking_stat
+
 cat("Ranking statistic:", stat_col, "\n")
 
 if (!(stat_col %in% colnames(results_df))) {
@@ -51,18 +54,22 @@ results_df <- results_df %>%
     !is.na(.data[[stat_col]]),
     !is.infinite(.data[[stat_col]])
   )
+
 cat(
   "Dropped", n_before - nrow(results_df),
   "gene(s) with NA/infinite", stat_col, "\n"
 )
 
 if (any(duplicated(results_df$gene_id))) {
+
   n_dup <- sum(duplicated(results_df$gene_id))
+
   cat(
     "WARNING:", n_dup, "duplicate gene_id(s) found; keeping",
     "the entry with the largest |", stat_col, "| for each.",
     "fgsea requires unique gene names.\n"
   )
+
   results_df <- results_df %>%
     mutate(.abs_stat = abs(.data[[stat_col]])) %>%
     arrange(desc(.abs_stat)) %>%
@@ -85,19 +92,22 @@ print(tail(ranking, 5))
 if (gsea_config$database == "GO") {
 
   library(org.Hs.eg.db)
+  library(GOSemSim)
 
   cat(
     "\nRunning gseGO (database:", gsea_config$database,
     ", ontology:", gsea_config$ontology, ")...\n"
   )
-  
+
   if (gsea_config$database != "GO") {
+
     cat(
       "WARNING: database '", gsea_config$database, "' is not",
       "yet implemented; running GO instead.\n", sep = ""
     )
+
   }
-  
+
   gsea_result <- gseGO(
     geneList = ranking,
     OrgDb = org.Hs.eg.db,
@@ -109,6 +119,7 @@ if (gsea_config$database == "GO") {
     by = "fgsea",
     seed = TRUE
   )
+
 } else if (gsea_config$database == "HALLMARK") {
 
   library(msigdbr)
@@ -142,9 +153,44 @@ if (gsea_config$database == "GO") {
 
 }
 
+# --- Reduce GO term redundancy (GO only) ----------------------------
+
+# GO:BP terms nest heavily (parent/child terms with highly
+# overlapping gene membership); simplify() collapses semantically
+# similar terms via GOSemSim, keeping the most significant
+# representative from each redundant cluster. This runs before the
+# results table and both plots are built, so all downstream outputs
+# reflect the de-duplicated term set. Not applicable to HALLMARK,
+# which isn't graph-structured the way GO is.
+if (gsea_config$database == "GO") {
+
+  n_terms_before <- nrow(as.data.frame(gsea_result))
+
+  cat(
+    "\nSimplifying redundant GO terms (cutoff = 0.7, by =",
+    "'p.adjust', select_fun = min)...\n"
+  )
+
+  gsea_result <- simplify(
+    gsea_result,
+    cutoff = 0.7,
+    by = "p.adjust",
+    select_fun = min
+  )
+  n_terms_after <- nrow(as.data.frame(gsea_result))
+
+  cat(
+    "GO terms:", n_terms_before, "before simplification,",
+    n_terms_after, "after (", n_terms_before - n_terms_after,
+    "collapsed into a more significant parent/child term).\n"
+  )
+
+}
+
 gsea_df_raw <- as.data.frame(gsea_result)
 
 if (nrow(gsea_df_raw) == 0) {
+
   cat(
     "WARNING: no significantly enriched pathways found",
     "(padj <", gsea_config$padj_threshold, "). Check gene set",
@@ -152,11 +198,14 @@ if (nrow(gsea_df_raw) == 0) {
     "underlying DE contrast had many significant genes to",
     "begin with.\n"
   )
+
   gsea_df <- data.frame(
     pathway = character(), NES = numeric(),
     padj = numeric(), size = integer()
   )
+
 } else {
+
   gsea_df <- gsea_df_raw %>%
     transmute(
       pathway = Description,
@@ -170,16 +219,19 @@ if (nrow(gsea_df_raw) == 0) {
     "Pathways with padj <", gsea_config$padj_threshold, ":",
     nrow(gsea_df), "\n"
   )
+
 }
 
 # --- Save GSEA results (gzip --best compressed TSV) --------------------
 
 cat("\nSaving GSEA results...\n")
+
 output_table <- snakemake@output[["gsea_table"]]
 dir.create(dirname(output_table), showWarnings = FALSE, recursive = TRUE)
 con <- gzfile(output_table, open = "wb", compression = 9)
 write_tsv(gsea_df, con)
 close(con)
+
 cat("Saved:", output_table, "\n")
 
 # --- Plot top enriched pathways ------------------------------------
@@ -187,6 +239,7 @@ cat("Saved:", output_table, "\n")
 cat("\nGenerating GSEA plot...\n")
 
 if (nrow(gsea_df) > 0) {
+
   top_gsea <- gsea_df %>% slice_head(n = 15)
 
   gsea_plot <- ggplot(
@@ -216,8 +269,11 @@ if (nrow(gsea_df) > 0) {
     snakemake@output[["gsea_plot"]], gsea_plot,
     width = 10, height = 7, dpi = 300
   )
+
   cat("Plot saved:", snakemake@output[["gsea_plot"]], "\n")
+
 } else {
+
   cat("No pathways to plot.\n")
 
   empty_plot <- ggplot() +
@@ -232,9 +288,43 @@ if (nrow(gsea_df) > 0) {
     snakemake@output[["gsea_plot"]], empty_plot,
     width = 8, height = 6, dpi = 300
   )
+
+}
+
+# --- Ridge plot of top pathways -------------------------------------
+
+cat("\nGenerating GSEA ridge plot...\n")
+
+if (nrow(gsea_df) > 0) {
+
+  ridge_n <- min(15, nrow(gsea_df))
+
+  gsea_ridge <- ridgeplot(gsea_result, showCategory = ridge_n) +
+    labs(title = paste("GSEA Ridge Plot:", contrast_name)) +
+    theme(
+      axis.text.y = element_text(size = 8),
+      plot.title = element_text(size = 12, face = "bold")
+    )
+
+  ggsave(
+    snakemake@output[["gsea_ridge_plot"]], gsea_ridge,
+    width = 10, height = 8, dpi = 300
+  )
+
+  cat("Ridge plot saved:", snakemake@output[["gsea_ridge_plot"]], "\n")
+} else {
+
+  cat("No pathways to plot (ridge).\n")
+  ggsave(
+
+    snakemake@output[["gsea_ridge_plot"]], empty,
+    width = 8, height = 6, dpi = 300
+  )
+
 }
 
 cat("\n=== GSEA Complete ===\n")
+
 sink(type = "message")
 sink()
 close(logfile)
