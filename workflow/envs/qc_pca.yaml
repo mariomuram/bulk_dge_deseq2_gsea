@@ -1,4 +1,3 @@
-name: qc_pca
 channels:
   - conda-forge
   - bioconda

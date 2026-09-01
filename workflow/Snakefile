@@ -151,6 +151,14 @@ SHRINKABLE_CONTRASTS = [
 ]
 
 GSEA_NAMES = list(config["gsea"].keys())
+GO_GSEA_NAMES = [
+    n for n in GSEA_NAMES if config["gsea"][n]["database"] == "GO"
+]
+OTHER_GSEA_NAMES = [
+    n for n in GSEA_NAMES if config["gsea"][n]["database"] != "GO"
+]
+
+HEATMAP_TOP_N = config["gsea_summary"]["heatmap_top_n"]
 
 
 wildcard_constraints:
@@ -179,9 +187,17 @@ rule all:
     # GSEA results
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_simplified.tsv.gz",
+           contrast=CONTRAST_NAMES, gsea=GO_GSEA_NAMES),
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
            plot = { "plot", "ridge_plot" }),
+    # GSEA summary results
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz", gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
+           gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
+           gsea=GSEA_NAMES),
 
 rule deseq2_fit:
   input: counts = "data/quantification/star_rsem/rsem.merged.gene_counts.tsv",
@@ -254,17 +270,79 @@ rule qc_ma:
   conda: "envs/qc_ma.yaml"
   script: "scripts/qc_ma.R"
 
-rule gsea:
-  input: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
+rule gsea_run_go:
+  wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
+  input:
+    results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
+    ranking_lib = workflow.source_path("scripts/lib/gsea_ranking.R"),
+    # ^-- explicitly re-run upon code change
+  output:
+    gsea_result_rds =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_result.rds"
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
     gsea_config = lambda wc: config["gsea"][wc.gsea],
+  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_run.log"
+  conda: "envs/gsea_run_go.yaml"
+  script: "scripts/gsea_run_go.R"
+
+rule gsea_run_hallmark:
+  wildcard_constraints: gsea = "|".join(OTHER_GSEA_NAMES)
+  input: 
+    results = rules.gsea_run_go.input.results,
+    ranking_lib = rules.gsea_run_go.input.ranking_lib,
+    # ^-- explicitly re-run upon code change
+  output: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
+  params:
+    contrast_name = "{contrast}",
+    gsea_name = "{gsea}",
+    gsea_config = lambda wc: config["gsea"][wc.gsea],
+  log: rules.gsea_run_go.log
+  conda: "envs/gsea_run_hallmark.yaml"
+  script: "scripts/gsea_run_hallmark.R"
+
+rule gsea_postprocess_go:
+  wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
+  input: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
   output:
     gsea_table = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+    gsea_table_simplified =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_simplified.tsv.gz",
     gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
     gsea_ridge_plot =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
-  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}.log"
-  conda: "envs/gsea.yaml"
-  script: "scripts/gsea.R"
+  params:
+    contrast_name = "{contrast}",
+    gsea_name = "{gsea}",
+    gsea_config = lambda wc: config["gsea"][wc.gsea],
+  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_postprocess.log"
+  conda: "envs/gsea_postprocess_go.yaml"
+  script: "scripts/gsea_postprocess.R"
+
+use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
+  wildcard_constraints: gsea = "|".join(OTHER_GSEA_NAMES)
+  output:
+    gsea_table = rules.gsea_postprocess_go.output.gsea_table,
+    gsea_plot = rules.gsea_postprocess_go.output.gsea_plot,
+    gsea_ridge_plot = rules.gsea_postprocess_go.output.gsea_ridge_plot,
+  conda: "envs/gsea_postprocess_hallmark.yaml"
+
+rule aggregate_gsea:
+  input:
+    lambda wc: expand(
+      rules.gsea_postprocess_go.output.gsea_table,
+      contrast=CONTRAST_NAMES, gsea=wc.gsea
+    )
+  output:
+    summary_table = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz",
+    heatmap = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
+    jaccard = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
+  params:
+    contrast_names = CONTRAST_NAMES,
+    gsea_name = "{gsea}",
+    padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
+    heatmap_top_n = HEATMAP_TOP_N
+  log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}_aggregate.log"
+  conda: "envs/gsea_summary.yaml"
+  script: "scripts/gsea_summary.R"

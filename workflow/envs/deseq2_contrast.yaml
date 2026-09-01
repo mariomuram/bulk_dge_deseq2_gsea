@@ -1,4 +1,3 @@
-name: deseq2-contrast
 channels:
   - conda-forge
   - bioconda

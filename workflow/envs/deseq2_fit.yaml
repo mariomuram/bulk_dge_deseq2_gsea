@@ -1,4 +1,3 @@
-name: deseq2-fit
 channels:
   - conda-forge
   - bioconda

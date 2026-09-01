@@ -85,5 +85,8 @@ gsea:
     padj_threshold: 0.05
     ranking_stat: "stat"
 
+gsea_summary:
+  heatmap_top_n: 60
+
 # Output Directory
 output_dir: "results"

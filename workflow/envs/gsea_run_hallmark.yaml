@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - bioconductor-clusterprofiler
+  - bioconductor-fgsea
+  - r-msigdbr
+  - r-readr
+  - r-dplyr

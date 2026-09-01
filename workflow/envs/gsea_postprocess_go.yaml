@@ -1,0 +1,14 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - r-base
+  - bioconductor-clusterprofiler
+  - bioconductor-enrichplot
+  - bioconductor-org.hs.eg.db
+  - bioconductor-gosemsim
+  - r-ggridges
+  - r-readr
+  - r-dplyr
+  - r-ggplot2

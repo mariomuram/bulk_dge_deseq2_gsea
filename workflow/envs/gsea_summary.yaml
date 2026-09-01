@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - r-base
+  - r-readr
+  - r-dplyr
+  - r-tidyr
+  - r-ggplot2

@@ -1,4 +1,3 @@
-name: deseq2-relevel
 channels:
   - conda-forge
   - bioconda
