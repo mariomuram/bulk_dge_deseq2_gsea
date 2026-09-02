@@ -51,18 +51,23 @@ cat(
 )
 
 cat("\nRunning GSEA (HALLMARK)...\n")
+# pvalueCutoff = 1 -- see the matching comment in gsea_run_go.R;
+# same reasoning applies here, database-independent.
 gsea_result <- GSEA(
   geneList = ranking,
   TERM2GENE = hallmark_sets[, c("gs_name", "gene_symbol")],
   minGSSize = gsea_config$min_set_size,
   maxGSSize = gsea_config$max_set_size,
-  pvalueCutoff = gsea_config$padj_threshold,
+  pvalueCutoff = 1,
   by = "fgsea",
   seed = TRUE
 )
+n_sig <- sum(as.data.frame(gsea_result)$p.adjust < gsea_config$padj_threshold)
 cat(
   "\nGSEA complete:", nrow(as.data.frame(gsea_result)),
-  "significant term(s) at padj <", gsea_config$padj_threshold, "\n"
+  "gene set(s) tested,", n_sig, "significant at padj <",
+  gsea_config$padj_threshold, "(significance applied in",
+  "postprocess, not here)\n"
 )
 
 # --- Save gseaResult object for postprocessing ------------------------

@@ -185,9 +185,11 @@ rule all:
     expand(f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_shrunk.pdf",
            contrast=SHRINKABLE_CONTRASTS),
     # GSEA results
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_simplified.tsv.gz",
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",
+           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
            contrast=CONTRAST_NAMES, gsea=GO_GSEA_NAMES),
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
@@ -306,9 +308,10 @@ rule gsea_postprocess_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
   input: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
   output:
-    gsea_table = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea.tsv.gz",
+    gsea_table_all = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",
+    gsea_table_signif = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",
     gsea_table_simplified =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_simplified.tsv.gz",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
     gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
     gsea_ridge_plot =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
@@ -323,7 +326,8 @@ rule gsea_postprocess_go:
 use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
   wildcard_constraints: gsea = "|".join(OTHER_GSEA_NAMES)
   output:
-    gsea_table = rules.gsea_postprocess_go.output.gsea_table,
+    gsea_table_all = rules.gsea_postprocess_go.output.gsea_table_all,
+    gsea_table_signif = rules.gsea_postprocess_go.output.gsea_table_signif,
     gsea_plot = rules.gsea_postprocess_go.output.gsea_plot,
     gsea_ridge_plot = rules.gsea_postprocess_go.output.gsea_ridge_plot,
   conda: "envs/gsea_postprocess_hallmark.yaml"
@@ -331,7 +335,7 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
 rule aggregate_gsea:
   input:
     lambda wc: expand(
-      rules.gsea_postprocess_go.output.gsea_table,
+      rules.gsea_postprocess_go.output.gsea_table_all,
       contrast=CONTRAST_NAMES, gsea=wc.gsea
     )
   output:

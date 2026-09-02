@@ -1,11 +1,15 @@
 #!/usr/bin/env Rscript
 # Post-processes a live gseaResult object (produced by
-# gsea_run_go.R or gsea_run_hallmark.R): GO-only redundancy
-# reduction via simplify(), the results table(s), the top-pathway
-# bar plot, and the ridge plot. Shared across both databases --
-# collateral reruns here are cheap (seconds), so this stays one
-# script with a database branch rather than being split further;
-# the expensive fgsea run is what got isolated into gsea_run_*.R.
+# gsea_run_go.R or gsea_run_hallmark.R). The run scripts now use
+# pvalueCutoff = 1, so this script -- not the enrichment call --
+# is where the padj_threshold significance decision is made. It
+# writes three tables: every tested gene set (gsea_table_all, the
+# input to scripts/gsea_summary.R), this contrast's significant
+# subset (gsea_table_signif), and for GO only, that subset with
+# redundant terms collapsed (gsea_table_simplified). It also builds
+# the bar and ridge plots from the significant (GO: simplified) subset.
+# Shared across both databases -- collateral reruns here are
+# cheap, so this stays one script with a database branch.
 library(readr)
 library(dplyr)
 library(ggplot2)
@@ -31,20 +35,13 @@ cat("Database:", gsea_config$database, "\n\n")
 gsea_result <- readRDS(snakemake@input[["gsea_result_rds"]])
 cat(
   "Loaded gseaResult:", nrow(as.data.frame(gsea_result)),
-  "term(s) at padj <", gsea_config$padj_threshold, "\n"
+  "gene set(s) tested (all, unfiltered by significance)\n"
 )
 
 # --- Helper: gseaResult -> tidy data frame ----------------------------
-tidy_gsea <- function(x, padj_threshold) {
+tidy_gsea <- function(x) {
   raw <- as.data.frame(x)
   if (nrow(raw) == 0) {
-    cat(
-      "WARNING: no significantly enriched pathways found",
-      "(padj <", padj_threshold, "). Check gene set size",
-      "bounds, the ranking statistic used, and whether the",
-      "underlying DE contrast had many significant genes to",
-      "begin with.\n"
-    )
     return(data.frame(
       pathway = character(), NES = numeric(),
       padj = numeric(), size = integer()
@@ -60,21 +57,61 @@ tidy_gsea <- function(x, padj_threshold) {
     arrange(padj)
 }
 
-# --- Save the raw (unfiltered-for-redundancy) table -------------------
+# --- Save the "all tested gene sets" table -----------------------------
 
-# This is the canonical table: identical in shape/meaning for GO
-# and HALLMARK, and the one scripts/gsea_summary.R reads across
-# contrasts. It must NOT depend on GO-only redundancy reduction --
-# which of two near-duplicate GO terms survives simplify() is
-# decided by that contrast's own p-values, so using the simplified
-# object here would let the SAME semantic signal show up under
-# different term IDs in different contrasts, fragmenting pathway
-# identity right where the comparison script's union needs it most.
-gsea_df <- tidy_gsea(gsea_result, gsea_config$padj_threshold)
-cat("\nPathways in raw table:", nrow(gsea_df), "\n")
+# This is the canonical table for cross-contrast comparison
+# (scripts/gsea_summary.R). It is NOT restricted to this contrast's
+# own significance call, so a gene set that's significant in one
+# contrast and just short of threshold in another -- with a
+# near-identical NES either way -- doesn't look like it's specific
+# to the former. That's exactly the artifact a per-contrast
+# pvalueCutoff would otherwise bake in.
+gsea_df_all <- tidy_gsea(gsea_result)
+if (nrow(gsea_df_all) == 0) {
+  cat(
+    "WARNING: no gene sets were tested at all -- check",
+    "min_set_size/max_set_size against how many genes survived",
+    "ranking. This is independent of padj_threshold: it means",
+    "nothing was even in scope to test, not that nothing was",
+    "significant.\n"
+  )
+}
+cat("\nGene sets tested (all):", nrow(gsea_df_all), "\n")
 
-cat("\nSaving raw GSEA table...\n")
-output_table <- snakemake@output[["gsea_table"]]
+cat("\nSaving all-gene-sets GSEA table...\n")
+output_table_all <- snakemake@output[["gsea_table_all"]]
+dir.create(dirname(output_table_all), showWarnings = FALSE, recursive = TRUE)
+con <- gzfile(output_table_all, open = "wb", compression = 9)
+write_tsv(gsea_df_all, con)
+close(con)
+cat("Saved:", output_table_all, "\n")
+
+# --- Derive the significant-only table ---------------------------
+
+# gsea_run_*.R runs with pvalueCutoff = 1, so this contrast's own
+# significance call has to be applied explicitly here rather than
+# inherited from the enrichment call. filter() has a registered
+# method for gseaResult objects (returns a gseaResult, not a plain
+# data frame), so simplify()/ridgeplot() below still work on it.
+gsea_result_sig <- gsea_result %>%
+  filter(p.adjust < gsea_config$padj_threshold)
+gsea_df <- tidy_gsea(gsea_result_sig)
+if (nrow(gsea_df) == 0) {
+  cat(
+    "WARNING: no significantly enriched pathways found",
+    "(padj <", gsea_config$padj_threshold, ") among the",
+    nrow(gsea_df_all), "gene set(s) tested. Check the ranking",
+    "statistic used and whether the underlying DE contrast had",
+    "many significant genes to begin with.\n"
+  )
+}
+cat(
+  "\nPathways significant at padj <", gsea_config$padj_threshold,
+  ":", nrow(gsea_df), "\n"
+)
+
+cat("\nSaving significant-only GSEA table...\n")
+output_table <- snakemake@output[["gsea_table_signif"]]
 dir.create(dirname(output_table), showWarnings = FALSE, recursive = TRUE)
 con <- gzfile(output_table, open = "wb", compression = 9)
 write_tsv(gsea_df, con)
@@ -86,38 +123,45 @@ cat("Saved:", output_table, "\n")
 # GO:BP terms nest heavily (parent/child terms with highly
 # overlapping gene membership); simplify() collapses semantically
 # similar terms via GOSemSim, keeping the most significant
-# representative from each redundant cluster. This is deliberately
-# NOT what feeds gsea_table above -- but it IS what the plots and
-# the simplified table are built from, since decluttering a single
-# contrast's own display is exactly what simplify() is for.
-plot_source <- gsea_result
+# representative from each redundant cluster. Runs on the
+# significant subset, not the full tested universe -- clustering
+# thousands of untested-as-relevant terms would be both wasteful
+# and meaningless. This feeds the plots and the simplified table
+# only; gsea_table_all and gsea_table_signif above are unaffected.
+plot_source <- gsea_result_sig
 plot_df <- gsea_df
 
 if (gsea_config$database == "GO") {
   library(org.Hs.eg.db)
   library(GOSemSim)
 
-  n_terms_before <- nrow(as.data.frame(gsea_result))
-  cat(
-    "\nSimplifying redundant GO terms (cutoff = 0.7, by =",
-    "'p.adjust', select_fun = min)...\n"
-  )
-  gsea_result_simplified <- simplify(
-    gsea_result,
-    cutoff = 0.7,
-    by = "p.adjust",
-    select_fun = min
-  )
-  n_terms_after <- nrow(as.data.frame(gsea_result_simplified))
-  cat(
-    "GO terms:", n_terms_before, "before simplification,",
-    n_terms_after, "after (", n_terms_before - n_terms_after,
-    "collapsed into a more significant parent/child term).\n"
-  )
-
-  simplified_df <- tidy_gsea(
-    gsea_result_simplified, gsea_config$padj_threshold
-  )
+  if (nrow(gsea_df) == 0) {
+    cat(
+      "\nNo significant GO terms to simplify; writing an empty",
+      "simplified table.\n"
+    )
+    simplified_df <- gsea_df
+  } else {
+    n_terms_before <- nrow(gsea_df)
+    cat(
+      "\nSimplifying redundant GO terms (cutoff = 0.7, by =",
+      "'p.adjust', select_fun = min)...\n"
+    )
+    gsea_result_simplified <- simplify(
+      gsea_result_sig,
+      cutoff = 0.7,
+      by = "p.adjust",
+      select_fun = min
+    )
+    n_terms_after <- nrow(as.data.frame(gsea_result_simplified))
+    cat(
+      "GO terms:", n_terms_before, "before simplification,",
+      n_terms_after, "after (", n_terms_before - n_terms_after,
+      "collapsed into a more significant parent/child term).\n"
+    )
+    simplified_df <- tidy_gsea(gsea_result_simplified)
+    plot_source <- gsea_result_simplified
+  }
 
   cat("\nSaving simplified GO table...\n")
   output_table_simplified <- snakemake@output[["gsea_table_simplified"]]
@@ -130,7 +174,6 @@ if (gsea_config$database == "GO") {
   close(con)
   cat("Saved:", output_table_simplified, "\n")
 
-  plot_source <- gsea_result_simplified
   plot_df <- simplified_df
 } else {
   cat("\nNot GO -- no redundancy reduction, no simplified table.\n")

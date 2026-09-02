@@ -1,10 +1,15 @@
 #!/usr/bin/env Rscript
 # Cross-contrast GSEA summary, run once per database/analysis
 # (i.e. once per `gsea` wildcard -- gobp, hallmark, etc). Reads
-# every contrast's already-significance-thresholded, unsimplified
-# GSEA table (see scripts/gsea_postprocess.R for why it must be
-# the unsimplified one), unions the pathways significant in ANY
-# contrast, and builds:
+# every contrast's gsea_table_all (ALL tested gene sets, not just
+# this contrast's own significant ones -- see gsea_postprocess.R).
+# Unions the pathways significant in ANY contrast, then reports
+# each unioned pathway's real NES/padj from every contrast it was
+# tested in -- including contrasts where that pathway didn't
+# independently clear padj_threshold. Filtering per-contrast before
+# unioning would make a pathway with near-identical NES look
+# contrast-specific whenever it happened to sit just either side of
+# the threshold in different contrasts; this avoids that. Builds:
 #   - a pathway x contrast matrix of NES (padj alongside)
 #   - a heatmap of that matrix (capped for legibility)
 #   - a pairwise Jaccard-overlap table of each contrast pair's
@@ -31,8 +36,8 @@ heatmap_top_n <- snakemake@params[["heatmap_top_n"]]
 cat("Analysis name:", gsea_name, "\n")
 cat("Contrasts:", paste(contrast_names, collapse = ", "), "\n")
 cat(
-  "padj threshold (inherited from per-contrast runs):",
-  padj_threshold, "\n\n"
+  "padj threshold (applied here, per contrast, to decide union",
+  "membership):", padj_threshold, "\n\n"
 )
 
 input_paths <- unlist(snakemake@input)
@@ -46,7 +51,7 @@ if (length(input_paths) != length(contrast_names)) {
   )
 }
 
-# --- Load every contrast's significant-pathway table ------------------
+# --- Load every contrast's full (all tested gene sets) table ----------
 
 cat("Loading per-contrast tables...\n")
 per_contrast <- vector("list", length(contrast_names))
@@ -67,13 +72,29 @@ for (i in seq_along(contrast_names)) {
 }
 
 long_df <- bind_rows(per_contrast)
-n_sig_pathways <- n_distinct(long_df$pathway)
 cat(
-  "\nUnion of significant pathways across all contrasts:",
-  n_sig_pathways, "\n"
+  "\nTotal (pathway, contrast) rows loaded across all tested gene",
+  "sets:", nrow(long_df), "\n"
 )
 
-if (nrow(long_df) == 0) {
+# --- Per-contrast significant sets, and their union --------------------
+
+sig_by_contrast <- long_df %>% filter(padj < padj_threshold)
+sig_sets <- split(sig_by_contrast$pathway, sig_by_contrast$contrast)
+for (contrast in contrast_names) {
+  if (is.null(sig_sets[[contrast]])) {
+    sig_sets[[contrast]] <- character()
+  }
+  sig_sets[[contrast]] <- unique(sig_sets[[contrast]])
+}
+
+union_sig_pathways <- unique(unlist(sig_sets, use.names = FALSE))
+cat(
+  "\nUnion of pathways significant in at least one contrast:",
+  length(union_sig_pathways), "\n"
+)
+
+if (length(union_sig_pathways) == 0) {
   cat(
     "WARNING: no contrast had any significant pathway for '",
     gsea_name, "' (padj < ", padj_threshold, "). Writing empty ",
@@ -82,17 +103,25 @@ if (nrow(long_df) == 0) {
   )
 }
 
+# --- Restrict to that union, but keep every contrast's real NES/padj ---
+
+# Deliberately NOT filtering each row by that contrast's own
+# significance: a pathway significant in contrast A still shows
+# its actual (possibly just-short-of-threshold) NES/padj from
+# contrast B here, rather than NA.
+display_df <- long_df %>% filter(pathway %in% union_sig_pathways)
+
 # --- Wide summary table: pathway rows, per-contrast NES/padj cols -----
 
 cat("\nBuilding wide summary table...\n")
-if (nrow(long_df) > 0) {
-  nes_wide <- long_df %>%
+if (nrow(display_df) > 0) {
+  nes_wide <- display_df %>%
     select(pathway, contrast, NES) %>%
     pivot_wider(
       names_from = contrast, values_from = NES,
       names_prefix = "NES_"
     )
-  padj_wide <- long_df %>%
+  padj_wide <- display_df %>%
     select(pathway, contrast, padj) %>%
     pivot_wider(
       names_from = contrast, values_from = padj,
@@ -102,12 +131,14 @@ if (nrow(long_df) > 0) {
     left_join(padj_wide, by = "pathway") %>%
     arrange(pathway)
   cat(
-    "NOTE: a pathway with NA for a given contrast means it did",
-    "not clear that contrast's own padj <", padj_threshold,
-    "threshold -- not necessarily that it was tested and found",
-    "non-significant vs. never reaching significance at all;",
-    "the per-contrast tables only ever contain",
-    "already-thresholded results.\n"
+    "NOTE: a pathway with NA for a given contrast means it was",
+    "not tested there at all (e.g. too few of its member genes",
+    "survived that contrast's own ranking-stat filtering to",
+    "clear min_set_size) -- NOT that it fell short of",
+    "significance. Every contrast's real NES/padj is shown for",
+    "any pathway significant in at least one contrast, even",
+    "where that particular contrast didn't independently clear",
+    "padj <", padj_threshold, ".\n"
   )
 } else {
   summary_df <- data.frame(pathway = character())
@@ -128,15 +159,26 @@ cat("Saved:", output_table, "\n")
 # --- Heatmap (capped for legibility) -----------------------------
 
 cat("\nGenerating summary heatmap...\n")
-if (nrow(long_df) > 0) {
-  pathway_rank <- long_df %>%
-    group_by(pathway) %>%
-    summarise(
-      n_contrasts = n_distinct(contrast),
-      max_abs_nes = max(abs(NES)),
-      .groups = "drop"
+if (nrow(display_df) > 0) {
+  # Ranked by how many contrasts each pathway is SIGNIFICANT in
+  # (not merely reported in -- with display_df now carrying every
+  # unioned pathway's NES/padj across nearly every contrast, "rows
+  # present" is no longer a useful ranking signal on its own).
+  sig_membership <- bind_rows(lapply(contrast_names, function(ct) {
+    data.frame(pathway = sig_sets[[ct]], contrast = ct)
+  }))
+  pathway_rank <- sig_membership %>%
+    count(pathway, name = "n_contrasts_significant") %>%
+    left_join(
+      display_df %>%
+        group_by(pathway) %>%
+        summarise(
+          max_abs_nes = max(abs(NES), na.rm = TRUE),
+          .groups = "drop"
+        ),
+      by = "pathway"
     ) %>%
-    arrange(desc(n_contrasts), desc(max_abs_nes))
+    arrange(desc(n_contrasts_significant), desc(max_abs_nes))
 
   n_total_pathways <- nrow(pathway_rank)
   top_pathways <- pathway_rank %>% slice_head(n = heatmap_top_n)
@@ -149,7 +191,7 @@ if (nrow(long_df) > 0) {
     )
   }
 
-  heatmap_df <- long_df %>%
+  heatmap_df <- display_df %>%
     filter(pathway %in% top_pathways$pathway) %>%
     mutate(
       pathway = factor(pathway, levels = rev(top_pathways$pathway)),
@@ -200,19 +242,10 @@ if (nrow(long_df) > 0) {
 # --- Pairwise Jaccard overlap of significant-pathway sets --------
 
 cat("\nComputing pairwise Jaccard overlap...\n")
-sig_sets <- split(long_df$pathway, long_df$contrast)
-# Contrasts with zero significant pathways still get an empty set,
-# not a missing one, so every pair is still reported.
-for (contrast in contrast_names) {
-  if (is.null(sig_sets[[contrast]])) {
-    sig_sets[[contrast]] <- character()
-  }
-}
-
 pairs <- combn(contrast_names, 2, simplify = FALSE)
 jaccard_rows <- lapply(pairs, function(p) {
-  a <- unique(sig_sets[[p[1]]])
-  b <- unique(sig_sets[[p[2]]])
+  a <- sig_sets[[p[1]]]
+  b <- sig_sets[[p[2]]]
   n_shared <- length(intersect(a, b))
   n_union <- length(union(a, b))
   jaccard <- if (n_union == 0) NA_real_ else n_shared / n_union
@@ -223,7 +256,7 @@ jaccard_rows <- lapply(pairs, function(p) {
 })
 jaccard_df <- bind_rows(jaccard_rows) %>% arrange(desc(jaccard))
 
-cat("Pairwise Jaccard summary:\n")
+cat("Pairwise Jaccard summary (on significant-pathway sets):\n")
 print(jaccard_df)
 
 cat("\nSaving Jaccard table...\n")
