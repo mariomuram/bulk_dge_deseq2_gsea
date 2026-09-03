@@ -284,7 +284,11 @@ rule gsea_run_go:
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
-    gsea_config = lambda wc: config["gsea"][wc.gsea],
+    database=lambda wc: config["gsea"][wc.gsea]["database"],
+    ontology=lambda wc: config["gsea"][wc.gsea]["ontology"],
+    ranking_stat=lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
+    min_set_size=lambda wc: config["gsea"][wc.gsea]["min_set_size"],
+    max_set_size=lambda wc: config["gsea"][wc.gsea]["max_set_size"],
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_run.log"
   conda: "envs/gsea_run_go.yaml"
   script: "scripts/gsea_run_go.R"
@@ -299,7 +303,10 @@ rule gsea_run_hallmark:
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
-    gsea_config = lambda wc: config["gsea"][wc.gsea],
+    database=lambda wc: config["gsea"][wc.gsea]["database"],
+    ranking_stat=lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
+    min_set_size=lambda wc: config["gsea"][wc.gsea]["min_set_size"],
+    max_set_size=lambda wc: config["gsea"][wc.gsea]["max_set_size"],
   log: rules.gsea_run_go.log
   conda: "envs/gsea_run_hallmark.yaml"
   script: "scripts/gsea_run_hallmark.R"
@@ -319,6 +326,8 @@ rule gsea_postprocess_go:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
     gsea_config = lambda wc: config["gsea"][wc.gsea],
+    database=lambda wc: config["gsea"][wc.gsea]["database"],
+    padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_postprocess.log"
   conda: "envs/gsea_postprocess_go.yaml"
   script: "scripts/gsea_postprocess.R"

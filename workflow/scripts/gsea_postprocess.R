@@ -26,10 +26,13 @@ cat("=== GSEA postprocess ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 contrast_name <- snakemake@params[["contrast_name"]]
-gsea_config <- snakemake@params[["gsea_config"]]
+gsea_name <- snakemake@params[["gsea_name"]]
+database <- snakemake@params[["database"]]
+padj_threshold <- snakemake@params[["padj_threshold"]]
+
 cat("Contrast:", contrast_name, "\n")
-cat("Analysis name:", snakemake@params[["gsea_name"]], "\n")
-cat("Database:", gsea_config$database, "\n\n")
+cat("Analysis name:", gsea_name, "\n")
+cat("Database:", database, "\n\n")
 
 # --- Load the enrichment result --------------------------------------
 gsea_result <- readRDS(snakemake@input[["gsea_result_rds"]])
@@ -94,21 +97,19 @@ cat("Saved:", output_table_all, "\n")
 # method for gseaResult objects (returns a gseaResult, not a plain
 # data frame), so simplify()/ridgeplot() below still work on it.
 gsea_result_sig <- gsea_result %>%
-  filter(p.adjust < gsea_config$padj_threshold)
+  filter(p.adjust < padj_threshold)
 gsea_df <- tidy_gsea(gsea_result_sig)
 if (nrow(gsea_df) == 0) {
   cat(
     "WARNING: no significantly enriched pathways found",
-    "(padj <", gsea_config$padj_threshold, ") among the",
-    nrow(gsea_df_all), "gene set(s) tested. Check the ranking",
-    "statistic used and whether the underlying DE contrast had",
-    "many significant genes to begin with.\n"
+    "(padj <", padj_threshold, ") among the", nrow(gsea_df_all),
+    "gene set(s) tested. Check the ranking statistic used and",
+    "whether the underlying DE contrast had many significant genes",
+    "to begin with.\n"
   )
 }
-cat(
-  "\nPathways significant at padj <", gsea_config$padj_threshold,
-  ":", nrow(gsea_df), "\n"
-)
+cat("\nPathways significant at padj <", padj_threshold, ":",
+    nrow(gsea_df), "\n")
 
 cat("\nSaving significant-only GSEA table...\n")
 output_table <- snakemake@output[["gsea_table_signif"]]
@@ -131,7 +132,7 @@ cat("Saved:", output_table, "\n")
 plot_source <- gsea_result_sig
 plot_df <- gsea_df
 
-if (gsea_config$database == "GO") {
+if (database == "GO") {
   library(org.Hs.eg.db)
   library(GOSemSim)
 

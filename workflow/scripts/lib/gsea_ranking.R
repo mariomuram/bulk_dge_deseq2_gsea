@@ -5,8 +5,8 @@
 # logic doesn't depend on which database the enrichment step uses.
 library(dplyr)
 
-validate_and_rank <- function(results_df, gsea_config) {
-  stat_col <- gsea_config$ranking_stat
+validate_and_rank <- function(results_df, ranking_stat) {
+  stat_col <- ranking_stat
   cat("Ranking statistic:", stat_col, "\n")
   if (!(stat_col %in% colnames(results_df))) {
     stop(
