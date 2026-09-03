@@ -195,18 +195,31 @@ if (nrow(display_df) > 0) {
     filter(pathway %in% top_pathways$pathway) %>%
     mutate(
       pathway = factor(pathway, levels = rev(top_pathways$pathway)),
-      contrast = factor(contrast, levels = contrast_names)
+      contrast = factor(contrast, levels = contrast_names),
+      significant = factor(
+        padj < padj_threshold,
+        levels = c(TRUE, FALSE)
+      )
     )
 
   n_pathways_shown <- nrow(top_pathways)
   heatmap_plot <- ggplot(
     heatmap_df,
-    aes(x = contrast, y = pathway, fill = NES)
+    aes(x = contrast, y = pathway, fill = NES, alpha = significant)
   ) +
     geom_tile(color = "white", linewidth = 0.3) +
     scale_fill_gradient2(
       low = "#2166ac", mid = "white", high = "#b2182b",
       midpoint = 0, na.value = "grey90"
+    ) +
+    scale_alpha_manual(
+      values = c(`TRUE` = 1, `FALSE` = 0.35),
+      labels = c(
+        `TRUE` = paste0("padj < ", padj_threshold),
+        `FALSE` = paste0("padj \u2265 ", padj_threshold)
+      ),
+      name = "Significant",
+      drop = FALSE
     ) +
     theme_minimal() +
     theme(
