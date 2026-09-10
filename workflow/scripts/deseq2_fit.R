@@ -31,18 +31,129 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== DESeq2 Fit ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
-# --- Read count matrix ---------------------------------------------
+# --- Read and merge count matrices (from multiple files) ---------------
 
-cat("Reading count matrix...\n")
-counts_file <- snakemake@input[["counts"]]
-counts_df <- read_tsv(counts_file, show_col_types = FALSE)
+count_files <- snakemake@input[["count_files"]]  # vector of file paths
+file_to_samples <- snakemake@params[["file_to_samples"]]  # file path -> samples mapping
 
-gene_ids <- counts_df[[1]]
-counts_matrix <- as.matrix(counts_df[, -c(1, 2)])
+if (length(count_files) == 1L) {
+
+  cat("Reading count matrix...\n")
+
+} else {
+
+  cat("Reading count matrices from multiple files...\n")
+  
+  # Validate: no sample in multiple files
+  sample_counts <- table(
+    do.call(c, lapply(file_to_samples,
+                      function(file) { names(file$samples) }))
+  )
+  duplicated_samples <- names(sample_counts)[sample_counts > 1]
+  if (length(duplicated_samples) > 0) {
+    stop(
+      "ERROR: the following sample(s) appear in more than one file: ",
+      paste(duplicated_samples, collapse = ", ")
+    )
+  }
+  
+  cat("Expected files:", paste(count_files, collapse = ", "), "\n")
+
+}
+
+cat("Total samples to load:", length(sample_counts), "\n\n")
+
+# Read all files and merge on gene_id
+file_to_counts <- list()
+seen_genes <- NULL
+
+for (file_path in count_files) {
+  cat("Reading:", file_path, "\n")
+  df <- read_tsv(file_path, show_col_types = FALSE)
+  
+  # Assuming first column is gene_id, second is (unused) annotation
+  gene_col <- df[[1]]
+  sample_cols <- colnames(df)[-c(1, 2)]
+  file_idx <- which(sapply(file_to_samples,
+                           function(file) { if ("path" %in% names(file))
+                                              return(file$path)
+                                            return(NULL) })
+                      == file_path)
+  if (length(file_idx) == 0L) {
+    stop(
+      "ERROR: the following file path is not listed in the file-to-samples ",
+      "mapping: ", file_path
+    )
+  } else {
+    if (length(file_idx) > 1L) {
+      stop(
+        "ERROR: the following file path is listed several times in the",
+        "file-to-samples mapping:",
+        paste(names(file_to_samples)[file_idx], collapse = ", ")
+      )
+    }
+  }
+  stopifnot(length(file_idx) == 1L)
+  file_key <- names(file_to_samples)[[file_idx]]
+  file_samples <- names(file_to_samples[[file_idx]]$samples)
+  if (length(file_samples) == 0L) {
+    stop(
+      "ERROR: the following file path is not associated to any sample(s): ",
+      file_path
+    )
+  }
+  missing_samples <- setdiff(file_samples, sample_cols)
+  if (length(missing_samples) > 0L) {
+    stop(
+      "ERROR: the following sample(s) is/are missing from `", file_path, "`:",
+      paste(missing_samples, collapse = ", ")
+    )
+  }
+  extra_samples <- setdiff(sample_cols, file_samples)
+  if (length(extra_samples) > 0L) {
+    cat(
+      "WARNING: `", file_path, "` contains the following extra sample(s):\n  ",
+      paste(extra_samples, collapse = ", "), "\n...dropping\n", sep = ""
+    )
+  }
+  
+  cat("  Genes:", nrow(df), ", Samples:", length(sample_cols), "(kept:",
+      length(file_samples), ")\n")
+  
+  # Check gene consistency
+  if (is.null(seen_genes)) {
+    seen_genes <- gene_col
+  } else {
+    if (!identical(gene_col, seen_genes)) {
+      stop(
+        "ERROR: gene set in ", file_path, " does not match ",
+        "the first file. Genes must be identical across all files ",
+        "(same set, same order). Use an explicit gene_id join if ",
+        "gene sets differ."
+      )
+    }
+  }
+  
+  file_to_samples[[file_key]] <- file_samples
+  file_to_counts[[file_key]] <- df[, file_samples, drop = FALSE]
+}
+
+gene_ids <- seen_genes
+
+# Merge all count matrices side-by-side
+# (same gene order across all files means cbind is safe)
+counts_matrix <- do.call(cbind, unname(file_to_counts))
+counts_matrix <- as.matrix(counts_matrix)
 rownames(counts_matrix) <- gene_ids
 
-cat("Dimensions:", nrow(counts_df), "genes x",
-    ncol(counts_matrix), "samples (raw file)\n")
+# Double-check that columns match file_to_samples keys (parsed sample IDs)
+expected_samples <- names(sample_counts)
+actual_samples <- colnames(counts_matrix)
+stopifnot(setequal(expected_samples, actual_samples))
+
+cat("\nMerged dimensions:", nrow(counts_matrix), "genes x",
+    ncol(counts_matrix), "samples (total across all files)\n")
+
 
 # --- Build sample metadata (fields parsed in the Snakefile) --------
 

@@ -5,17 +5,42 @@
 sample_label_pattern: "{background}_{dox}"
 
 # Sample Information (for reproducibility)
-samples:
-#  iHSC_CBi08_1: "parental_clean"
-#  iHSC_CBi08_2: "parental_clean"
-  iHSC_CBi08_dCas9rtTA_lib15_1: "parental_nodox"
-  iHSC_CBi08_dCas9rtTA_lib15_2: "parental_nodox"
-  iHSC_CBi08_dCas9rtTA_lib15_dox_1: "parental_dox"
-  iHSC_CBi08_dCas9rtTA_lib15_dox_2: "parental_dox"
-  iHSC_GATA2R396Q_dCas9rtTA_lib15_1: "GATA2R396Q_nodox"
-  iHSC_GATA2R396Q_dCas9rtTA_lib15_2: "GATA2R396Q_nodox"
-  iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
-  iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
+files:
+  results:
+    path: "data/quantification/star_rsem/rsem.merged.gene_counts.tsv"
+    samples:
+      iHSC_CBi08_dCas9rtTA_lib15_dox_1: "parental_dox"
+      iHSC_CBi08_dCas9rtTA_lib15_dox_2: "parental_dox"
+      iHSC_GATA2R396Q_dCas9rtTA_lib15_1: "GATA2R396Q_nodox"
+      iHSC_GATA2R396Q_dCas9rtTA_lib15_2: "GATA2R396Q_nodox"
+      iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
+      iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
+  # Note: The above file actually contains columns for the below
+  # samples as well. However, Eric did explicitly feed the version
+  # from the separate file below to DESeq2 for these samples
+  # specifically. Why he did this and what is the difference between
+  # the two files has not been documented. However, while the
+  # `parental_nodox` samples nicely separate into their own quadrant
+  # in a PCA with the above samples when using data from the above
+  # file only, adding the `parental_clean` ones from the same file
+  # shows that they are completely different from the others, as if
+  # they belong to another time point or cell type or the like.
+  # Based on Eric's results, this is not the case when using the
+  # results from the columns labelled with the same samples from the
+  # file below. Thus, Maria and me decided to confirm Eric's results
+  # and follow his steps even if we do not understand the reasoning
+  # behind them. We have reached out to him and hope to get clarity
+  # regarding this oddity soon. Otherwise, the quantification should
+  # eventually be repeated independently from scratch using the exact
+  # same code for all samples.
+  # TODO: Update based on Eric's feedback.
+  results_benchmarking:
+    path: "data/quantification/star_rsem/rsem.benchmarking_merged.gene_counts.tsv"
+    samples:
+      iHSC_CBi08_dCas9rtTA_lib15_1: "parental_nodox"
+      iHSC_CBi08_dCas9rtTA_lib15_2: "parental_nodox"
+#      iHSC_CBi08_1: "parental_clean"
+#      iHSC_CBi08_2: "parental_clean"
 
 # The design is always the full crossing (all main effects and
 # interactions) of every parsed sample field -- built and fit
@@ -44,6 +69,9 @@ design:
 # a group-averaged model-matrix contrast against the primary
 # full-crossing dds).
 contrasts:
+#  CBi08_nodox_vs_clean:
+#    numerator: "parental_nodox"
+#    denominator: "parental_clean"
   GATA2_dox_vs_nodox:
     numerator: "GATA2R396Q_dox"
     denominator: "GATA2R396Q_nodox"

@@ -11,9 +11,33 @@ import itertools
 configfile: "config/config.yaml"
 
 OUTPUT_DIR = config["output_dir"]
-SAMPLES_INFO = config["samples"]
 DESIGN = config["design"]
 LABEL_PATTERN = config["sample_label_pattern"]
+
+# --- Parse the new files structure and flatten samples ---------------
+
+FILES = config["files"]  # dict of {file_key: {path: ..., samples: {...}}}
+
+# Flatten back to SAMPLES_INFO and track file origins
+SAMPLES_INFO = {}
+SAMPLE_TO_FILE = {}
+FILE_TO_SAMPLES = {}
+
+for file_key, file_info in FILES.items():
+  file_path = file_info["path"]
+  file_samples = file_info["samples"]
+
+  for sample_id, label in file_samples.items():
+    # Check for duplicate sample IDs across files (hard error)
+    if sample_id in SAMPLES_INFO:
+      raise ValueError(
+        f"Sample '{sample_id}' appears in multiple file groups: "
+        f"previously in '{SAMPLE_TO_FILE[sample_id]['file_key']}', "
+        f"now in '{file_key}'. Samples must be unique across all files."
+      )
+    SAMPLES_INFO[sample_id] = label
+    SAMPLE_TO_FILE[sample_id] = {"file_key": file_key, "path": file_path}
+    FILE_TO_SAMPLES[file_key] = {"path": file_path, "samples": file_samples}
 
 # --- Parse every sample label into its fields -----------------------
 
@@ -98,6 +122,12 @@ REFERENCE_LEVELS = {}
 for field in FIELD_NAMES:
   observed = sorted({v[field] for v in SAMPLE_FIELDS.values()})
   REFERENCE_LEVELS[field] = configured_ref_levels.get(field, observed[0])
+
+# --- Build count file list for Snakemake dependency tracking -----------
+
+COUNT_FILE_PATHS = sorted(
+  set(file_info["path"] for file_info in FILES.values())
+)
 
 # --- Which coefficients actually exist, given the observed ------
 # --- (possibly incomplete) factorial. ----------------------------
@@ -202,11 +232,12 @@ rule all:
            gsea=GSEA_NAMES),
 
 rule deseq2_fit:
-  input: counts = "data/quantification/star_rsem/rsem.merged.gene_counts.tsv",
+  input: count_files = COUNT_FILE_PATHS,
   params:
     samples_info = SAMPLES_INFO,
     sample_fields = SAMPLE_FIELDS,
     reference_levels = REFERENCE_LEVELS,
+    file_to_samples = FILE_TO_SAMPLES,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
   log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
   conda: "envs/deseq2_fit.yaml"
