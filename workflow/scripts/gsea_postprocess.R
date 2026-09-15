@@ -246,7 +246,6 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
 # --- Ridge plot of pathways of interest -----------------------------
 cat("\nGenerating GSEA ridge plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
-  ridge_n <- nrow(gsea_df_gene_sets_of_interest)
   gsea_ridge <- ridgeplot(gsea_result, showCategory = gene_sets_of_interest) +
     labs(title = paste("GSEA Ridge Plot:", contrast_name)) +
     theme(
