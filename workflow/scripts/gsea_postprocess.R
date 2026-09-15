@@ -29,6 +29,7 @@ contrast_name <- snakemake@params[["contrast_name"]]
 gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
 padj_threshold <- snakemake@params[["padj_threshold"]]
+gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
 
 cat("Contrast:", contrast_name, "\n")
 cat("Analysis name:", gsea_name, "\n")
@@ -130,8 +131,7 @@ cat("Saved:", output_table, "\n")
 # thousands of untested-as-relevant terms would be both wasteful
 # and meaningless. This feeds the plots and the simplified table
 # only; gsea_table_all and gsea_table_signif above are unaffected.
-plot_source <- gsea_result_sig
-plot_df <- gsea_df
+gsea_df_top_source <- gsea_df
 
 if (database == "GO") {
   library(org.Hs.eg.db)
@@ -162,7 +162,6 @@ if (database == "GO") {
       "collapsed into a more significant parent/child term).\n"
     )
     simplified_df <- tidy_gsea(gsea_result_simplified)
-    plot_source <- gsea_result_simplified
   }
 
   cat("\nSaving simplified GO table...\n")
@@ -176,17 +175,33 @@ if (database == "GO") {
   close(con)
   cat("Saved:", output_table_simplified, "\n")
 
-  plot_df <- simplified_df
+  gsea_df_top_source <- simplified_df
 } else {
   cat("\nNot GO -- no redundancy reduction, no simplified table.\n")
 }
 
-# --- Plot top enriched pathways ------------------------------------
+# --- Pathways to plot ----------------------------------------------
+# If no pathways of interest provided: use top enriched pathways
+cat("\nExtracting pathways to plot...\n")
+if (!is.null(gene_sets_of_interest)) {
+  cat("\nUsing gene sets of interest specified...\n")
+} else {
+  cat("No gene sets of interest specified...using top pathways...\n")
+  gene_sets_of_interest <- gsea_df_top_source %>%
+    slice_head(n = 15) %>%
+    pull(id)
+}
+
+gsea_df_gene_sets_of_interest <- gsea_df %>%
+  filter(id %in% gene_sets_of_interest)
+gsea_result_gene_sets_of_interest <- gsea_result %>%
+  filter(ID %in% gene_sets_of_interest)
+
+# --- Plot pathways of interest ------------------------------------
 cat("\nGenerating GSEA plot...\n")
-if (nrow(plot_df) > 0) {
-  top_gsea <- plot_df %>% slice_head(n = 15)
+if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_plot <- ggplot(
-    top_gsea,
+    gsea_df_gene_sets_of_interest,
     aes(x = reorder(description, padj), y = -log10(padj), fill = NES)
   ) +
     geom_bar(stat = "identity", alpha = 0.8) +
@@ -227,11 +242,11 @@ if (nrow(plot_df) > 0) {
   )
 }
 
-# --- Ridge plot of top pathways -------------------------------------
+# --- Ridge plot of pathways of interest -----------------------------
 cat("\nGenerating GSEA ridge plot...\n")
-if (nrow(plot_df) > 0) {
-  ridge_n <- min(15, nrow(plot_df))
-  gsea_ridge <- ridgeplot(plot_source, showCategory = ridge_n) +
+if (nrow(gsea_df_gene_sets_of_interest) > 0) {
+  ridge_n <- nrow(gsea_df_gene_sets_of_interest)
+  gsea_ridge <- ridgeplot(gsea_result, showCategory = gene_sets_of_interest) +
     labs(title = paste("GSEA Ridge Plot:", contrast_name)) +
     theme(
       axis.text.y = element_text(size = 8),
