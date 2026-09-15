@@ -46,13 +46,14 @@ tidy_gsea <- function(x) {
   raw <- as.data.frame(x)
   if (nrow(raw) == 0) {
     return(data.frame(
-      pathway = character(), NES = numeric(),
-      padj = numeric(), size = integer()
+      id = character(), description = character(),
+      NES = numeric(), padj = numeric(), size = integer()
     ))
   }
   raw %>%
     transmute(
-      pathway = Description,
+      id = ID,
+      description = Description,
       NES = NES,
       padj = p.adjust,
       size = setSize
@@ -186,7 +187,7 @@ if (nrow(plot_df) > 0) {
   top_gsea <- plot_df %>% slice_head(n = 15)
   gsea_plot <- ggplot(
     top_gsea,
-    aes(x = reorder(pathway, padj), y = -log10(padj), fill = NES)
+    aes(x = reorder(description, padj), y = -log10(padj), fill = NES)
   ) +
     geom_bar(stat = "identity", alpha = 0.8) +
     scale_fill_gradient2(

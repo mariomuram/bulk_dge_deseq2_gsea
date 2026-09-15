@@ -60,15 +60,15 @@ for (i in seq_along(contrast_names)) {
   path <- input_paths[i]
   cat(" -", contrast, ":", path, "\n")
   df <- read_tsv(path, show_col_types = FALSE)
-  if (!all(c("pathway", "NES", "padj") %in% colnames(df))) {
+    if (!all(c("id", "description", "NES", "padj") %in% colnames(df))) {
     stop(
       "ERROR: ", path, " is missing one of the expected columns ",
-      "'pathway', 'NES', 'padj'. Got: ",
+      "'id', 'description', 'NES', 'padj'. Got: ",
       paste(colnames(df), collapse = ", ")
     )
   }
   df$contrast <- contrast
-  per_contrast[[i]] <- df %>% select(pathway, contrast, NES, padj)
+  per_contrast[[i]] <- df %>% select(id, description, contrast, NES, padj)
 }
 
 long_df <- bind_rows(per_contrast)
@@ -80,7 +80,7 @@ cat(
 # --- Per-contrast significant sets, and their union --------------------
 
 sig_by_contrast <- long_df %>% filter(padj < padj_threshold)
-sig_sets <- split(sig_by_contrast$pathway, sig_by_contrast$contrast)
+sig_sets <- split(sig_by_contrast$id, sig_by_contrast$contrast)
 for (contrast in contrast_names) {
   if (is.null(sig_sets[[contrast]])) {
     sig_sets[[contrast]] <- character()
@@ -88,13 +88,13 @@ for (contrast in contrast_names) {
   sig_sets[[contrast]] <- unique(sig_sets[[contrast]])
 }
 
-union_sig_pathways <- unique(unlist(sig_sets, use.names = FALSE))
+union_sig_ids <- unique(unlist(sig_sets, use.names = FALSE))
 cat(
   "\nUnion of pathways significant in at least one contrast:",
-  length(union_sig_pathways), "\n"
+  length(union_sig_ids), "\n"
 )
 
-if (length(union_sig_pathways) == 0) {
+if (length(union_sig_ids) == 0) {
   cat(
     "WARNING: no contrast had any significant pathway for '",
     gsea_name, "' (padj < ", padj_threshold, "). Writing empty ",
@@ -109,27 +109,47 @@ if (length(union_sig_pathways) == 0) {
 # significance: a pathway significant in contrast A still shows
 # its actual (possibly just-short-of-threshold) NES/padj from
 # contrast B here, rather than NA.
-display_df <- long_df %>% filter(pathway %in% union_sig_pathways)
+display_df <- long_df %>% filter(id %in% union_sig_ids)
+
+# One description per ID, for display (heatmap axis, summary
+# table). An ID should map to a single description reliably
+# within a run; this defensively takes the first encountered
+# per ID rather than assuming it, per pipeline convention.
+id_description <- display_df %>%
+  distinct(id, description) %>%
+  group_by(id) %>%
+  summarise(description = first(description), .groups = "drop")
+n_multi_desc <- sum(duplicated(
+  (display_df %>% distinct(id, description))$id
+))
+if (n_multi_desc > 0) {
+  cat(
+    "WARNING:", n_multi_desc, "gene set ID(s) mapped to more",
+    "than one description across contrasts; keeping the first",
+    "description encountered per ID.\n"
+  )
+}
 
 # --- Wide summary table: pathway rows, per-contrast NES/padj cols -----
 
 cat("\nBuilding wide summary table...\n")
 if (nrow(display_df) > 0) {
   nes_wide <- display_df %>%
-    select(pathway, contrast, NES) %>%
+    select(id, contrast, NES) %>%
     pivot_wider(
       names_from = contrast, values_from = NES,
       names_prefix = "NES_"
     )
   padj_wide <- display_df %>%
-    select(pathway, contrast, padj) %>%
+    select(id, contrast, padj) %>%
     pivot_wider(
       names_from = contrast, values_from = padj,
       names_prefix = "padj_"
     )
-  summary_df <- nes_wide %>%
-    left_join(padj_wide, by = "pathway") %>%
-    arrange(pathway)
+  summary_df <- id_description %>%
+    left_join(nes_wide, by = "id") %>%
+    left_join(padj_wide, by = "id") %>%
+    arrange(id)
   cat(
     "NOTE: a pathway with NA for a given contrast means it was",
     "not tested there at all (e.g. too few of its member genes",
@@ -141,7 +161,7 @@ if (nrow(display_df) > 0) {
     "padj <", padj_threshold, ".\n"
   )
 } else {
-  summary_df <- data.frame(pathway = character())
+  summary_df <- data.frame(id = character(), description = character())
   for (contrast in contrast_names) {
     summary_df[[paste0("NES_", contrast)]] <- numeric()
     summary_df[[paste0("padj_", contrast)]] <- numeric()
@@ -165,19 +185,20 @@ if (nrow(display_df) > 0) {
   # unioned pathway's NES/padj across nearly every contrast, "rows
   # present" is no longer a useful ranking signal on its own).
   sig_membership <- bind_rows(lapply(contrast_names, function(ct) {
-    data.frame(pathway = sig_sets[[ct]], contrast = ct)
+    data.frame(id = sig_sets[[ct]], contrast = ct)
   }))
   pathway_rank <- sig_membership %>%
-    count(pathway, name = "n_contrasts_significant") %>%
+    count(id, name = "n_contrasts_significant") %>%
     left_join(
       display_df %>%
-        group_by(pathway) %>%
+        group_by(id) %>%
         summarise(
           max_abs_nes = max(abs(NES), na.rm = TRUE),
           .groups = "drop"
         ),
-      by = "pathway"
+      by = "id"
     ) %>%
+    left_join(id_description, by = "id") %>%
     arrange(desc(n_contrasts_significant), desc(max_abs_nes))
 
   n_total_pathways <- nrow(pathway_rank)
@@ -192,9 +213,11 @@ if (nrow(display_df) > 0) {
   }
 
   heatmap_df <- display_df %>%
-    filter(pathway %in% top_pathways$pathway) %>%
+    filter(id %in% top_pathways$id) %>%
+    select(-description) %>%
+    left_join(id_description, by = "id") %>%
     mutate(
-      pathway = factor(pathway, levels = rev(top_pathways$pathway)),
+      description = factor(description, levels = rev(top_pathways$description)),
       contrast = factor(contrast, levels = contrast_names),
       significant = factor(
         padj < padj_threshold,
@@ -205,7 +228,7 @@ if (nrow(display_df) > 0) {
   n_pathways_shown <- nrow(top_pathways)
   heatmap_plot <- ggplot(
     heatmap_df,
-    aes(x = contrast, y = pathway, fill = NES, alpha = significant)
+    aes(x = contrast, y = description, fill = NES, alpha = significant)
   ) +
     geom_tile(color = "white", linewidth = 0.3) +
     scale_fill_gradient2(
