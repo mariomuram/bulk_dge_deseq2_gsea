@@ -39,8 +39,8 @@ files:
     samples:
       iHSC_CBi08_dCas9rtTA_lib15_1: "parental_nodox"
       iHSC_CBi08_dCas9rtTA_lib15_2: "parental_nodox"
-#      iHSC_CBi08_1: "parental_clean"
-#      iHSC_CBi08_2: "parental_clean"
+      iHSC_CBi08_1: "parental_clean"
+      iHSC_CBi08_2: "parental_clean"
 
 # The design is always the full crossing (all main effects and
 # interactions) of every parsed sample field -- built and fit
@@ -69,9 +69,9 @@ design:
 # a group-averaged model-matrix contrast against the primary
 # full-crossing dds).
 contrasts:
-#  CBi08_nodox_vs_clean:
-#    numerator: "parental_nodox"
-#    denominator: "parental_clean"
+  CBi08_nodox_vs_clean:
+    numerator: "parental_nodox"
+    denominator: "parental_clean"
   GATA2_dox_vs_nodox:
     numerator: "GATA2R396Q_dox"
     denominator: "GATA2R396Q_nodox"
