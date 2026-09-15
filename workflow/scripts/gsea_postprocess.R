@@ -15,6 +15,7 @@ library(dplyr)
 library(ggplot2)
 library(clusterProfiler)
 library(enrichplot)
+library(forcats)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -268,6 +269,38 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
     theme_void()
   ggsave(
     snakemake@output[["gsea_ridge_plot"]], empty_ridge,
+    width = 8, height = 6, dpi = 300
+  )
+}
+
+# --- Lollipop plot of pathways of interest ---------------------------
+cat("\nGenerating GSEA lollipop plot...\n")
+if (nrow(gsea_df_gene_sets_of_interest) > 0) {
+  gsea_lollipop <- gsea_result_gene_sets_of_interest %>%
+    ggplot(aes(NES, fct_reorder(Description, NES))) +
+    geom_segment(aes(xend = 0, yend = Description)) +
+    geom_point(aes(color = p.adjust, size = Count)) +
+    scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
+    scale_size_continuous(range = c(1, 7)) +
+    theme_minimal() +
+    xlab("Normalized Enrichment Score") +
+    ylab(NULL)
+  ggsave(
+    snakemake@output[["gsea_lollipop_plot"]], gsea_lollipop,
+    width = 10, height = 8, dpi = 300
+  )
+  cat("Lollipop plot saved:", snakemake@output[["gsea_lollipop_plot"]], "\n")
+} else {
+  cat("No pathways to plot (lollipop).\n")
+  empty_lollipop <- ggplot() +
+    annotate(
+      "text", x = 0.5, y = 0.5,
+      label = "No significant pathways found",
+      size = 5, color = "gray50"
+    ) +
+    theme_void()
+  ggsave(
+    snakemake@output[["gsea_lollipop_plot"]], empty_lollipop,
     width = 8, height = 6, dpi = 300
   )
 }

@@ -12,3 +12,4 @@ dependencies:
   - r-readr
   - r-dplyr
   - r-ggplot2
+  - r-forcats

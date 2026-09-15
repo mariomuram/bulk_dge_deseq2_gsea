@@ -360,6 +360,8 @@ rule gsea_postprocess_go:
     gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
     gsea_ridge_plot =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
+    gsea_lollipop_plot =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_lollipop_plot.pdf",
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
@@ -378,6 +380,7 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
     gsea_table_signif = rules.gsea_postprocess_go.output.gsea_table_signif,
     gsea_plot = rules.gsea_postprocess_go.output.gsea_plot,
     gsea_ridge_plot = rules.gsea_postprocess_go.output.gsea_ridge_plot,
+    gsea_lollipop_plot = rules.gsea_postprocess_go.output.gsea_lollipop_plot,
   conda: "envs/gsea_postprocess_hallmark.yaml"
 
 rule aggregate_gsea:
