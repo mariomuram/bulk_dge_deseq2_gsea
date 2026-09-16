@@ -4,6 +4,7 @@
 library(ggplot2)
 library(dplyr)
 library(readr)
+library(ggrepel)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -36,7 +37,7 @@ cat(
 
 volcano_plot <- ggplot(
   results_df,
-  aes(x = lfc_value, y = neg_log10_padj, color = color)
+  aes(x = lfc_value, y = neg_log10_padj, color = color, label = label)
 ) +
   geom_point(alpha = 0.6, size = 2) +
   geom_vline(
@@ -46,6 +47,13 @@ volcano_plot <- ggplot(
   geom_hline(
     yintercept = -log10(padj_threshold),
     linetype = "dashed", color = "gray50"
+  ) +
+  geom_text_repel(
+    size = 3,
+    max.overlaps = Inf,
+    min.segment.length = 0,
+    segment.color = "grey40",
+    show.legend = FALSE
   ) +
   scale_color_manual(
     values = c(

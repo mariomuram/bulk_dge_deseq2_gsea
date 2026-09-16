@@ -4,6 +4,7 @@
 library(ggplot2)
 library(dplyr)
 library(readr)
+library(ggrepel)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -61,10 +62,17 @@ results_df <- results_df %>%
 
 ma_plot <- ggplot(
   results_df,
-  aes(x = baseMean, y = lfc_value, color = color)
+  aes(x = baseMean, y = lfc_value, color = color, label = label)
 ) +
   geom_point(alpha = 0.5, size = 2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_text_repel(
+    size = 3,
+    max.overlaps = Inf,
+    min.segment.length = 0,
+    segment.color = "grey40",
+    show.legend = FALSE
+  ) +
   scale_x_log10() +
   scale_color_manual(
     values = c("Significant" = "red", "Not Significant" = "gray")

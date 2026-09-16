@@ -180,6 +180,7 @@ SHRINKABLE_CONTRASTS = [
   if contrast_is_shrinkable(spec)
 ]
 
+GENES_OF_INTEREST = config.get("genes_of_interest", None)
 GSEA_NAMES = list(config["gsea"].keys())
 GO_GSEA_NAMES = [
     n for n in GSEA_NAMES if config["gsea"][n]["database"] == "GO"
@@ -280,8 +281,9 @@ rule qc_volcano:
   params:
     contrast_name = "{contrast}",
     lfc_type = "{lfc_type}",
-    padj_threshold = config["deseq2"]["padj_threshold"],
-    log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
+    padj_threshold = rules.deseq2_contrast.params.padj_threshold,
+    log2fc_threshold = rules.deseq2_contrast.params.log2fc_threshold,
+    genes_of_interest = GENES_OF_INTEREST,
   output:
     volcano = f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_{{lfc_type}}.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_volcano_{{contrast}}_{{lfc_type}}.log"
@@ -294,9 +296,10 @@ rule qc_ma:
     qc_input_lib = rules.qc_volcano.input.qc_input_lib,
     # ^-- explicitly re-run upon code change
   params:
-    contrast_name = "{contrast}",
-    lfc_type = "{lfc_type}",
-    padj_threshold = config["deseq2"]["padj_threshold"],
+    contrast_name = rules.qc_volcano.params.contrast_name,
+    lfc_type = rules.qc_volcano.params.lfc_type,
+    padj_threshold = rules.qc_volcano.params.padj_threshold,
+    genes_of_interest = rules.qc_volcano.params.genes_of_interest,
   output: ma = f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_{{lfc_type}}.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_ma_{{contrast}}_{{lfc_type}}.log"
   conda: "envs/qc_ma.yaml"
@@ -314,11 +317,11 @@ rule gsea_run_go:
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
-    database=lambda wc: config["gsea"][wc.gsea]["database"],
-    ontology=lambda wc: config["gsea"][wc.gsea]["ontology"],
-    ranking_stat=lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
-    min_set_size=lambda wc: config["gsea"][wc.gsea]["min_set_size"],
-    max_set_size=lambda wc: config["gsea"][wc.gsea]["max_set_size"],
+    database = lambda wc: config["gsea"][wc.gsea]["database"],
+    ontology = lambda wc: config["gsea"][wc.gsea]["ontology"],
+    ranking_stat = lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
+    min_set_size = lambda wc: config["gsea"][wc.gsea]["min_set_size"],
+    max_set_size = lambda wc: config["gsea"][wc.gsea]["max_set_size"],
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_run.log"
   conda: "envs/gsea_run_go.yaml"
   script: "scripts/gsea_run_go.R"
@@ -331,12 +334,12 @@ rule gsea_run_hallmark:
     # ^-- explicitly re-run upon code change
   output: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
   params:
-    contrast_name = "{contrast}",
-    gsea_name = "{gsea}",
-    database=lambda wc: config["gsea"][wc.gsea]["database"],
-    ranking_stat=lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
-    min_set_size=lambda wc: config["gsea"][wc.gsea]["min_set_size"],
-    max_set_size=lambda wc: config["gsea"][wc.gsea]["max_set_size"],
+    contrast_name = rules.gsea_run_go.params.contrast_name,
+    gsea_name = rules.gsea_run_go.params.gsea_name,
+    database = rules.gsea_run_go.params.database,
+    ranking_stat = rules.gsea_run_go.params.ranking_stat,
+    min_set_size = rules.gsea_run_go.params.min_set_size,
+    max_set_size = rules.gsea_run_go.params.max_set_size,
   log: rules.gsea_run_go.log
   conda: "envs/gsea_run_hallmark.yaml"
   script: "scripts/gsea_run_hallmark.R"
@@ -364,9 +367,9 @@ rule gsea_postprocess_go:
     gsea_lollipop_plot =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_lollipop_plot.pdf",
   params:
-    contrast_name = "{contrast}",
-    gsea_name = "{gsea}",
-    database=lambda wc: config["gsea"][wc.gsea]["database"],
+    contrast_name = rules.gsea_run_go.params.contrast_name,
+    gsea_name = rules.gsea_run_go.params.gsea_name,
+    database = rules.gsea_run_go.params.database,
     padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
     gene_sets_of_interest = _gene_sets_of_interest_for_gsea,
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_postprocess.log"
@@ -396,8 +399,8 @@ rule aggregate_gsea:
     jaccard = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
   params:
     contrast_names = CONTRAST_NAMES,
-    gsea_name = "{gsea}",
-    padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
+    gsea_name = rules.gsea_postprocess_go.params.gsea_name,
+    padj_threshold = rules.gsea_postprocess_go.params.padj_threshold,
     gene_sets_of_interest =
       rules.gsea_postprocess_go.params.gene_sets_of_interest,
     heatmap_top_n = HEATMAP_TOP_N
