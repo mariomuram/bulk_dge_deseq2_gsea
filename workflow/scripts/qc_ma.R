@@ -19,20 +19,7 @@ cat("Contrast:", contrast_name, "\n")
 cat("LFC type:", lfc_type, "\n")
 cat("padj threshold:", padj_threshold, "\n\n")
 
-results_df <- read_tsv(snakemake@input[["results"]], show_col_types = FALSE)
-
-lfc_col <- if (lfc_type == "shrunk") "log2FoldChange_shrunk" else "log2FoldChange"
-if (!(lfc_col %in% colnames(results_df))) {
-  stop("ERROR: column '", lfc_col, "' not found in results table.")
-}
-if (lfc_type == "shrunk" && all(is.na(results_df[[lfc_col]]))) {
-  stop(
-    "ERROR: log2FoldChange_shrunk is entirely NA for this ",
-    "contrast -- it should not have been requested as a ",
-    "shrinkable target. Check the Snakefile's ",
-    "SHRINKABLE_CONTRASTS derivation."
-  )
-}
+source(snakemake@input[["qc_input_lib"]])
 
 n_na <- sum(is.na(results_df$padj))
 if (n_na > 0) {
@@ -44,7 +31,7 @@ if (n_na > 0) {
   )
 }
 
-ma_df <- results_df %>%
+results_df <- results_df %>%
   mutate(
     lfc_value = .data[[lfc_col]],
     color = ifelse(
@@ -53,14 +40,27 @@ ma_df <- results_df %>%
     )
   )
 
-lfc_label <- if (lfc_type == "shrunk") {
-  "Log2 Fold Change (apeglm-shrunk)"
-} else {
-  "Log2 Fold Change (unshrunk MLE)"
+n_na <- sum(is.na(results_df$padj))
+if (n_na > 0) {
+  cat(
+    "NOTE:", n_na, "gene(s) have NA padj (independent",
+    "filtering and/or Cook's outliers); shown as",
+    "'Not Significant' rather than dropped, so the low-count",
+    "filtering funnel stays visible on the plot.\n"
+  )
 }
 
+results_df <- results_df %>%
+  mutate(
+    lfc_value = .data[[lfc_col]],
+    color = ifelse(
+      !is.na(padj) & padj < padj_threshold,
+      "Significant", "Not Significant"
+    )
+  )
+
 ma_plot <- ggplot(
-  ma_df,
+  results_df,
   aes(x = baseMean, y = lfc_value, color = color)
 ) +
   geom_point(alpha = 0.5, size = 2) +

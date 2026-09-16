@@ -12,32 +12,13 @@ sink(logfile, type = "output")
 sink(logfile, type = "message", append = TRUE)
 
 cat("=== QC: Volcano Plot ===\n")
-contrast_name <- snakemake@params[["contrast_name"]]
-lfc_type <- snakemake@params[["lfc_type"]]
-padj_threshold <- snakemake@params[["padj_threshold"]]
+
+source(snakemake@input[["qc_input_lib"]])
 log2fc_threshold <- snakemake@params[["log2fc_threshold"]]
-cat("Contrast:", contrast_name, "\n")
-cat("LFC type:", lfc_type, "\n")
-cat("padj threshold:", padj_threshold, "\n")
 cat("log2FC threshold:", log2fc_threshold, "\n\n")
 
-results_df <- read_tsv(snakemake@input[["results"]], show_col_types = FALSE)
-
-lfc_col <- if (lfc_type == "shrunk") "log2FoldChange_shrunk" else "log2FoldChange"
-if (!(lfc_col %in% colnames(results_df))) {
-  stop("ERROR: column '", lfc_col, "' not found in results table.")
-}
-if (lfc_type == "shrunk" && all(is.na(results_df[[lfc_col]]))) {
-  stop(
-    "ERROR: log2FoldChange_shrunk is entirely NA for this ",
-    "contrast -- it should not have been requested as a ",
-    "shrinkable target. Check the Snakefile's ",
-    "SHRINKABLE_CONTRASTS derivation."
-  )
-}
-
 n_before <- nrow(results_df)
-volcano_df <- results_df %>%
+results_df <- results_df %>%
   filter(!is.na(padj)) %>%
   mutate(
     lfc_value = .data[[lfc_col]],
@@ -49,18 +30,12 @@ volcano_df <- results_df %>%
     )
   )
 cat(
-  "Excluded", n_before - nrow(volcano_df),
+  "Excluded", n_before - nrow(results_df),
   "gene(s) with NA padj (cannot plot -log10(NA)).\n"
 )
 
-lfc_label <- if (lfc_type == "shrunk") {
-  "Log2 Fold Change (apeglm-shrunk)"
-} else {
-  "Log2 Fold Change (unshrunk MLE)"
-}
-
 volcano_plot <- ggplot(
-  volcano_df,
+  results_df,
   aes(x = lfc_value, y = neg_log10_padj, color = color)
 ) +
   geom_point(alpha = 0.6, size = 2) +

@@ -275,6 +275,8 @@ rule qc_pca:
 
 rule qc_volcano:
   input: results = rules.deseq2_contrast.output.results,
+    qc_input_lib = workflow.source_path("scripts/lib/qc_input.R"),
+    # ^-- explicitly re-run upon code change
   params:
     contrast_name = "{contrast}",
     lfc_type = "{lfc_type}",
@@ -287,7 +289,10 @@ rule qc_volcano:
   script: "scripts/qc_volcano.R"
 
 rule qc_ma:
-  input: results = rules.deseq2_contrast.output.results,
+  input:
+    results = rules.deseq2_contrast.output.results,
+    qc_input_lib = rules.qc_volcano.input.qc_input_lib,
+    # ^-- explicitly re-run upon code change
   params:
     contrast_name = "{contrast}",
     lfc_type = "{lfc_type}",
