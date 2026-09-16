@@ -10,6 +10,9 @@
 # the bar and ridge plots from the significant (GO: simplified) subset.
 # Shared across both databases -- collateral reruns here are
 # cheap, so this stays one script with a database branch.
+
+GENE_SETS_OF_INTEREST_FALLBACK_N <- 15L
+
 library(readr)
 library(dplyr)
 library(ggplot2)
@@ -181,22 +184,109 @@ if (database == "GO") {
   cat("\nNot GO -- no redundancy reduction, no simplified table.\n")
 }
 
-# --- Pathways to plot ----------------------------------------------
-# If no pathways of interest provided: use top enriched pathways
-cat("\nExtracting pathways to plot...\n")
-if (!is.null(gene_sets_of_interest)) {
-  cat("\nUsing gene sets of interest specified...\n")
+# --- Resolve and validate gene sets of interest ---------------------
+# Any configured ID not found is warned and omitted, and if that leaves
+# nothing, this contrast's job stops rather than silently rendering
+# an empty, misleadingly-labeled "no significant pathways" plot.
+cat("\nResolving gene sets of interest...\n")
+if (!is.null(gene_sets_of_interest) && length(gene_sets_of_interest) > 0) {
+  tested_ids <- gsea_df_all$id
+  missing_ids <- setdiff(gene_sets_of_interest, tested_ids)
+  if (length(missing_ids) > 0) {
+    cat(
+      "WARNING:", length(missing_ids), "configured gene set ID(s)",
+      "not found in this contrast's tested universe; omitting:",
+      paste(missing_ids, collapse = ", "), "\n"
+    )
+  }
+  gene_sets_of_interest <- intersect(gene_sets_of_interest, tested_ids)
+  if (length(gene_sets_of_interest) == 0) {
+    stop(
+      "ERROR: none of the configured `gene_sets_of_interest` for '",
+      gsea_name, "' were found among the ", nrow(gsea_df_all),
+      " gene set(s) tested for contrast '", contrast_name, "'. ",
+      "Check the ID(s) in `config[\"gsea\"][\"", gsea_name, "\"]",
+      "[\"gene_sets_of_interest\"]` against the id column of ",
+      "`gsea_table_all` for this contrast."
+    )
+  }
+  cat(
+    "Using", length(gene_sets_of_interest), "configured gene set(s)",
+    "of interest.\n"
+  )
 } else {
-  cat("No gene sets of interest specified...using top pathways...\n")
+  cat(
+    "No gene sets of interest configured; falling back to the top",
+    GENE_SETS_OF_INTEREST_FALLBACK_N, "by padj...\n"
+  )
   gene_sets_of_interest <- gsea_df_top_source %>%
-    slice_head(n = 15) %>%
+    slice_head(n = GENE_SETS_OF_INTEREST_FALLBACK_N) %>%
     pull(id)
 }
 
-gsea_df_gene_sets_of_interest <- gsea_df %>%
+# Unfiltered basis (all tested, not just this contrast's own
+# significant subset): a gene set the person explicitly asked for
+# should render with its real NES/padj even when it falls short of
+# padj_threshold here -- the same principle gsea_summary.R already
+# applies cross-contrast.
+gsea_df_gene_sets_of_interest <- gsea_df_all %>%
   filter(id %in% gene_sets_of_interest)
-gsea_result_gene_sets_of_interest <- gsea_result %>%
-  filter(ID %in% gene_sets_of_interest)
+
+# --- Leading-edge driver genes for pathways of interest ---------------
+# core_enrichment lives only on the live gseaResult (tidy_gsea() never
+# extracts it, since none of the on-disk tables want it) -- join it
+# straight onto gsea_df_gene_sets_of_interest rather than keeping a
+# second, parallel ID-filtered copy around. The join's left side is
+# already restricted to gene_sets_of_interest, so it also does the
+# filtering -- no separate filter() on gsea_result needed here.
+cat("\nBuilding driver-gene table...\n")
+gsea_df_gene_sets_of_interest <- gsea_df_gene_sets_of_interest %>%
+  left_join(
+    as.data.frame(gsea_result) %>% transmute(id = ID, core_enrichment),
+    by = "id"
+  )
+
+core_enrichment_clean <- ifelse(
+  is.na(gsea_df_gene_sets_of_interest$core_enrichment), "",
+  gsea_df_gene_sets_of_interest$core_enrichment
+)
+driver_gene_lists <- strsplit(core_enrichment_clean, "/", fixed = TRUE)
+gsea_df_gene_sets_of_interest$count <- lengths(driver_gene_lists)
+n_empty <- sum(gsea_df_gene_sets_of_interest$count == 0)
+if (n_empty > 0 && nrow(gsea_df_gene_sets_of_interest) > 0) {
+  cat(
+    "WARNING:", n_empty, "gene set(s) of interest have no",
+    "leading-edge genes recorded (empty core_enrichment).\n"
+  )
+}
+
+if (nrow(gsea_df_gene_sets_of_interest) > 0) {
+  driver_genes_df <- data.frame(
+    id = rep(
+      gsea_df_gene_sets_of_interest$id,
+      times = gsea_df_gene_sets_of_interest$count
+    ),
+    description = rep(
+      gsea_df_gene_sets_of_interest$description,
+      times = gsea_df_gene_sets_of_interest$count
+    ),
+    gene = unlist(driver_gene_lists, use.names = FALSE),
+    stringsAsFactors = FALSE
+  )
+} else {
+  driver_genes_df <- data.frame(
+    id = character(), description = character(), gene = character()
+  )
+}
+cat("Driver-gene rows:", nrow(driver_genes_df), "\n")
+
+output_driver_genes <- snakemake@output[["gsea_driver_genes"]]
+dir.create(dirname(output_driver_genes), showWarnings = FALSE,
+           recursive = TRUE)
+con <- gzfile(output_driver_genes, open = "wb", compression = 9)
+write_tsv(driver_genes_df, con)
+close(con)
+cat("Saved:", output_driver_genes, "\n")
 
 # --- Plot pathways of interest ------------------------------------
 cat("\nGenerating GSEA plot...\n")
@@ -275,10 +365,10 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
 # --- Lollipop plot of pathways of interest ---------------------------
 cat("\nGenerating GSEA lollipop plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
-  gsea_lollipop <- gsea_result_gene_sets_of_interest %>%
-    ggplot(aes(NES, fct_reorder(Description, NES))) +
-    geom_segment(aes(xend = 0, yend = Description)) +
-    geom_point(aes(color = p.adjust, size = Count)) +
+  gsea_lollipop <- gsea_df_gene_sets_of_interest %>%
+    ggplot(aes(NES, fct_reorder(description, NES))) +
+    geom_segment(aes(xend = 0, yend = description)) +
+    geom_point(aes(color = padj, size = count)) +
     scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
     scale_size_continuous(range = c(1, 7)) +
     theme_minimal() +

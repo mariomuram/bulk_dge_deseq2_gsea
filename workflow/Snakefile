@@ -206,24 +206,18 @@ rule all:
            contrast=CONTRAST_NAMES),
     # QC plots
     f"{OUTPUT_DIR}/qc/pca.pdf",
-    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_unshrunk.pdf",
-           contrast=CONTRAST_NAMES),
-    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_unshrunk.pdf",
-           contrast=CONTRAST_NAMES),
-    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_ma_plot_shrunk.pdf",
-           contrast=SHRINKABLE_CONTRASTS),
-    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_volcano_plot_shrunk.pdf",
-           contrast=SHRINKABLE_CONTRASTS),
+    expand(f"{OUTPUT_DIR}/qc/{{contrast}}_{{plot}}_plot_{{lfc}}.pdf",
+           contrast=CONTRAST_NAMES, plot = { "ma", "volcano" },
+           lfc = { "shrunk", "unshrunk" }),
     # GSEA results
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",
-           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",
-           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{table}}.tsv.gz",
+           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
+           table = { "all", "signif", "driver_genes" }),
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
            contrast=CONTRAST_NAMES, gsea=GO_GSEA_NAMES),
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
-           plot = { "plot", "ridge_plot" }),
+           plot = { "plot", "ridge_plot", "lollipop_plot" }),
     # GSEA summary results
     expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz", gsea=GSEA_NAMES),
     expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
@@ -357,6 +351,8 @@ rule gsea_postprocess_go:
     gsea_table_signif = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",
     gsea_table_simplified =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
+    gsea_driver_genes =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_driver_genes.tsv.gz",
     gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
     gsea_ridge_plot =
       f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
@@ -377,6 +373,7 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
   output:
     gsea_table_all = rules.gsea_postprocess_go.output.gsea_table_all,
     gsea_table_signif = rules.gsea_postprocess_go.output.gsea_table_signif,
+    gsea_driver_genes = rules.gsea_postprocess_go.output.gsea_driver_genes,
     gsea_plot = rules.gsea_postprocess_go.output.gsea_plot,
     gsea_ridge_plot = rules.gsea_postprocess_go.output.gsea_ridge_plot,
     gsea_lollipop_plot = rules.gsea_postprocess_go.output.gsea_lollipop_plot,
