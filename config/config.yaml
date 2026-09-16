@@ -96,6 +96,28 @@ deseq2:
   padj_threshold: 0.05
   log2fc_threshold: 0.0
 
+# Genes of interest
+genes_of_interest:
+  # mutated in some samples
+  - GATA2
+  # CRISPRi library targets (knocked down in some samples) [source:
+  # /CEPH/users/etorralba/Projects/CRISPRi_MARIA/NEW_DATA/library_15genes.tsv]:
+  - ACHE
+  - ACTB
+  - AHR
+  - CARD11
+  - CASP2
+  - CDCA7L
+  - CDK13
+  - CUX1
+  - EPO
+  - HOXA1
+  - HOXA9
+  - IRF5
+  - KMT2E
+  - NFE2L3
+  - RASA4B
+
 # GSEA Parameters
 gsea:
   gobp:
