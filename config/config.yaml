@@ -123,6 +123,7 @@ gsea:
       - 'HALLMARK_KRAS_SIGNALING_UP'
       - 'HALLMARK_E2F_TARGETS'
       - 'HALLMARK_TGF_BETA_SIGNALING'
+      - 'HALLMARK_UV_RESPONSE_DNA'
 
 gsea_summary:
   heatmap_top_n: 60
