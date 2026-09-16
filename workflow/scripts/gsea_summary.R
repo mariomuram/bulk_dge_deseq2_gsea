@@ -31,6 +31,7 @@ cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 gsea_name <- snakemake@params[["gsea_name"]]
 contrast_names <- snakemake@params[["contrast_names"]]
 padj_threshold <- snakemake@params[["padj_threshold"]]
+gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
 heatmap_top_n <- snakemake@params[["heatmap_top_n"]]
 
 cat("Analysis name:", gsea_name, "\n")
@@ -201,23 +202,61 @@ if (nrow(display_df) > 0) {
     left_join(id_description, by = "id") %>%
     arrange(desc(n_contrasts_significant), desc(max_abs_nes))
 
-  n_total_pathways <- nrow(pathway_rank)
-  top_pathways <- pathway_rank %>% slice_head(n = heatmap_top_n)
-  if (n_total_pathways > heatmap_top_n) {
+  if (!is.null(gene_sets_of_interest) && length(gene_sets_of_interest) > 0) {
+    missing_ids <- setdiff(gene_sets_of_interest, union_sig_ids)
+    if (length(missing_ids) > 0) {
+      cat(
+        "WARNING:", length(missing_ids), "configured gene set ID(s)",
+        "not significant in any contrast; omitting:",
+        paste(missing_ids, collapse = ", "), "\n"
+      )
+    }
+    gene_sets_of_interest <- intersect(gene_sets_of_interest, union_sig_ids)
+    if (length(gene_sets_of_interest) == 0) {
+      stop(
+        "ERROR: none of the configured `gene_sets_of_interest` for '",
+        gsea_name, "' were found among the ", length(union_sig_ids),
+        " gene set(s) significant across contrasts. ",
+        "Check the ID(s) in `config[\"gsea\"][\"", gsea_name, "\"]",
+        "[\"gene_sets_of_interest\"]` against the id column of ",
+        "`gsea_table_signif` for all contrasts."
+      )
+    }
     cat(
-      "NOTE:", n_total_pathways, "significant pathway(s) found;",
-      "heatmap limited to the top", heatmap_top_n, "(ranked by",
-      "number of contrasts significant in, then by max |NES|).",
-      "The full set is in the summary table.\n"
+      "Using", length(gene_sets_of_interest), "configured gene set(s)",
+      "of interest.\n"
     )
+  } else {
+    cat(
+      "No gene sets of interest configured; falling back to the top",
+      heatmap_top_n, "by padj...\n"
+    )
+    gene_sets_of_interest <- pathway_rank %>%
+      slice_head(n = heatmap_top_n) %>%
+      pull(id)
+
+    n_total_pathways <- nrow(pathway_rank)
+    if (n_total_pathways > heatmap_top_n) {
+      cat(
+        "NOTE:", n_total_pathways, "significant pathway(s) found;",
+        "heatmap limited to the top", heatmap_top_n, "(ranked by",
+        "number of contrasts significant in, then by max |NES|).",
+        "The full set is in the summary table.\n"
+      )
+    }
   }
 
+
+  gene_sets_of_interest <- pathway_rank %>%
+    filter(id %in% gene_sets_of_interest)
+
   heatmap_df <- display_df %>%
-    filter(id %in% top_pathways$id) %>%
+    filter(id %in% gene_sets_of_interest$id) %>%
     select(-description) %>%
     left_join(id_description, by = "id") %>%
     mutate(
-      description = factor(description, levels = rev(top_pathways$description)),
+      description = factor(description,
+                           levels = rev(gene_sets_of_interest$description)),
       contrast = factor(contrast, levels = contrast_names),
       significant = factor(
         padj < padj_threshold,
@@ -225,7 +264,7 @@ if (nrow(display_df) > 0) {
       )
     )
 
-  n_pathways_shown <- nrow(top_pathways)
+  n_pathways_shown <- nrow(gene_sets_of_interest)
   heatmap_plot <- ggplot(
     heatmap_df,
     aes(x = contrast, y = description, fill = NES, alpha = significant)

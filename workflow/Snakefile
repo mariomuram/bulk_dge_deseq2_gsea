@@ -393,6 +393,7 @@ rule aggregate_gsea:
     contrast_names = CONTRAST_NAMES,
     gsea_name = "{gsea}",
     padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
+    gene_sets_of_interest = _genes_of_interest_for_gsea,
     heatmap_top_n = HEATMAP_TOP_N
   log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}_aggregate.log"
   conda: "envs/gsea_summary.yaml"
