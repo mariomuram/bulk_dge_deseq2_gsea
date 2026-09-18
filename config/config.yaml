@@ -148,6 +148,11 @@ gsea:
       - 'HALLMARK_UV_RESPONSE_DNA'
 
 gsea_plots:
+  colors:
+    direction:
+      down: '#2166ac'
+      none: '#ffffff'
+      up: '#b2182b'
   lollipop_plot:
     # Either `size` (# genes in set) or `count` (# driver genes);
     # default: `count`

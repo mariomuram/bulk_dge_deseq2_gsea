@@ -34,6 +34,9 @@ gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
 padj_threshold <- snakemake@params[["padj_threshold"]]
 gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
+color_down <- snakemake@params[["color_down"]]
+color_none <- snakemake@params[["color_none"]]
+color_up <- snakemake@params[["color_up"]]
 lollipop_size <- snakemake@params[["lollipop_size"]]
 
 cat("Contrast:", contrast_name, "\n")
@@ -298,8 +301,8 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   ) +
     geom_bar(stat = "identity", alpha = 0.8) +
     scale_fill_gradient2(
-      low = "#2166ac", mid = "white", high = "#b2182b",
-      midpoint = 0
+      low = color_down, mid = color_none, high = color_up,
+      midpoint = 0, limits = \(x) max(abs(x), na.rm = TRUE) * c(-1, 1)
     ) +
     coord_flip() +
     theme_minimal() +
@@ -369,8 +372,13 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_lollipop <- gsea_df_gene_sets_of_interest %>%
     ggplot(aes(NES, fct_reorder(description, NES))) +
     geom_segment(aes(xend = 0, yend = description)) +
-    geom_point(aes(color = padj, size = .data[[lollipop_size]])) +
-    scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
+    geom_point(aes(color = -sign(NES) * log10(padj),
+                   size = .data[[lollipop_size]])) +
+    scale_color_gradient2(
+      low = color_down, mid = color_none, high = color_up,
+      midpoint = 0, limits = \(x) max(abs(x), na.rm = TRUE) * c(-1, 1)
+
+    ) +
     scale_size_continuous(range = c(1, 7)) +
     theme_minimal() +
     xlab("Normalized Enrichment Score") +
