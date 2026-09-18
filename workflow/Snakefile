@@ -372,6 +372,7 @@ rule gsea_postprocess_go:
     database = rules.gsea_run_go.params.database,
     padj_threshold = lambda wc: config["gsea"][wc.gsea]["padj_threshold"],
     gene_sets_of_interest = _gene_sets_of_interest_for_gsea,
+    lollipop_size = config["gsea_plots"]["lollipop_plot"]["size"],
   log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_postprocess.log"
   conda: "envs/gsea_postprocess_go.yaml"
   script: "scripts/gsea_postprocess.R"

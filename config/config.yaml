@@ -147,6 +147,13 @@ gsea:
       - 'HALLMARK_TGF_BETA_SIGNALING'
       - 'HALLMARK_UV_RESPONSE_DNA'
 
+gsea_plots:
+  lollipop_plot:
+    # Either `size` (# genes in set) or `count` (# driver genes);
+    # default: `count`
+    # TODO: Implement via JSON schema!
+    size: size
+
 gsea_summary:
   heatmap_top_n: 60
 

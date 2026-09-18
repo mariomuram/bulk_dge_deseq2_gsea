@@ -34,6 +34,7 @@ gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
 padj_threshold <- snakemake@params[["padj_threshold"]]
 gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
+lollipop_size <- snakemake@params[["lollipop_size"]]
 
 cat("Contrast:", contrast_name, "\n")
 cat("Analysis name:", gsea_name, "\n")
@@ -368,7 +369,7 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_lollipop <- gsea_df_gene_sets_of_interest %>%
     ggplot(aes(NES, fct_reorder(description, NES))) +
     geom_segment(aes(xend = 0, yend = description)) +
-    geom_point(aes(color = padj, size = count)) +
+    geom_point(aes(color = padj, size = .data[[lollipop_size]])) +
     scale_color_viridis_c(guide = guide_colorbar(reverse = TRUE)) +
     scale_size_continuous(range = c(1, 7)) +
     theme_minimal() +
