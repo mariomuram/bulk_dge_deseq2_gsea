@@ -14,6 +14,8 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== QC: PCA Plot ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+source(snakemake@input[["plot_theme_lib"]])
+
 dds <- readRDS(snakemake@input[["dds_rds"]])
 cat("Loaded dds:", ncol(dds), "samples,", nrow(dds), "genes\n")
 
@@ -31,17 +33,12 @@ pca_data <- plotPCA(
 )
 percent_var <- round(100 * attr(pca_data, "percentVar"))
 
+# TODO: Color scale! Play with scale.
 pca_plot <- ggplot(
   pca_data,
   aes(x = PC1, y = PC2, color = dox, shape = background)
 ) +
-  geom_point(size = 4, alpha = 0.8) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 10),
-    axis.title = element_text(size = 12),
-    legend.position = "right"
-  ) +
+  geom_point(size = default_point_size, alpha = 0.8) +
   labs(
     title = "PCA (all samples)",
     x = paste0("PC1: ", percent_var[1], "% variance"),
@@ -52,7 +49,7 @@ pca_plot <- ggplot(
 
 output_file <- snakemake@output[["pca"]]
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
-ggsave(output_file, pca_plot, width = 8, height = 6, dpi = 300)
+save_plot(output_file, pca_plot)
 cat("Saved:", output_file, "\n")
 
 cat("\n=== QC: PCA Plot Complete ===\n")

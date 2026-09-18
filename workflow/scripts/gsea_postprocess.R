@@ -29,6 +29,7 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== GSEA postprocess ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+source(snakemake@input[["plot_theme_lib"]])
 contrast_name <- snakemake@params[["contrast_name"]]
 gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
@@ -305,22 +306,13 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       midpoint = 0, limits = \(x) max(abs(x), na.rm = TRUE) * c(-1, 1)
     ) +
     coord_flip() +
-    theme_minimal() +
-    theme(
-      axis.text = element_text(size = 9),
-      axis.title = element_text(size = 11),
-      plot.title = element_text(size = 12, face = "bold")
-    ) +
     labs(
       title = paste("Top Enriched Pathways:", contrast_name),
       y = "-Log10(Adjusted p-value)",
       x = "",
       fill = "NES"
     )
-  ggsave(
-    snakemake@output[["gsea_plot"]], gsea_plot,
-    width = 10, height = 7, dpi = 300
-  )
+  save_plot(snakemake@output[["gsea_plot"]], gsea_plot)
   cat("Plot saved:", snakemake@output[["gsea_plot"]], "\n")
 } else {
   cat("No pathways to plot.\n")
@@ -331,25 +323,15 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       size = 5, color = "gray50"
     ) +
     theme_void()
-  ggsave(
-    snakemake@output[["gsea_plot"]], empty_plot,
-    width = 8, height = 6, dpi = 300
-  )
+  save_plot(snakemake@output[["gsea_plot"]], empty_plot)
 }
 
 # --- Ridge plot of pathways of interest -----------------------------
 cat("\nGenerating GSEA ridge plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_ridge <- ridgeplot(gsea_result, showCategory = gene_sets_of_interest) +
-    labs(title = paste("GSEA Ridge Plot:", contrast_name)) +
-    theme(
-      axis.text.y = element_text(size = 8),
-      plot.title = element_text(size = 12, face = "bold")
-    )
-  ggsave(
-    snakemake@output[["gsea_ridge_plot"]], gsea_ridge,
-    width = 10, height = 8, dpi = 300
-  )
+    labs(title = paste("GSEA Ridge Plot:", contrast_name))
+  save_plot(snakemake@output[["gsea_ridge_plot"]], gsea_ridge)
   cat("Ridge plot saved:", snakemake@output[["gsea_ridge_plot"]], "\n")
 } else {
   cat("No pathways to plot (ridge).\n")
@@ -360,10 +342,7 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       size = 5, color = "gray50"
     ) +
     theme_void()
-  ggsave(
-    snakemake@output[["gsea_ridge_plot"]], empty_ridge,
-    width = 8, height = 6, dpi = 300
-  )
+  save_plot(snakemake@output[["gsea_ridge_plot"]], empty_ridge)
 }
 
 # --- Lollipop plot of pathways of interest ---------------------------
@@ -379,14 +358,12 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       midpoint = 0, limits = \(x) max(abs(x), na.rm = TRUE) * c(-1, 1)
 
     ) +
-    scale_size_continuous(range = c(1, 7)) +
+    scale_size_continuous(range = c(default_point_size / 2,
+                                    default_point_size * 2)) +
     theme_minimal() +
     xlab("Normalized Enrichment Score") +
     ylab(NULL)
-  ggsave(
-    snakemake@output[["gsea_lollipop_plot"]], gsea_lollipop,
-    width = 10, height = 8, dpi = 300
-  )
+  save_plot(snakemake@output[["gsea_lollipop_plot"]], gsea_lollipop)
   cat("Lollipop plot saved:", snakemake@output[["gsea_lollipop_plot"]], "\n")
 } else {
   cat("No pathways to plot (lollipop).\n")
@@ -397,10 +374,7 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       size = 5, color = "gray50"
     ) +
     theme_void()
-  ggsave(
-    snakemake@output[["gsea_lollipop_plot"]], empty_lollipop,
-    width = 8, height = 6, dpi = 300
-  )
+  save_plot(snakemake@output[["gsea_lollipop_plot"]], empty_lollipop)
 }
 
 cat("\n=== GSEA postprocess complete ===\n")

@@ -268,7 +268,10 @@ rule deseq2_contrast:
   script: "scripts/deseq2_contrast.R"
 
 rule qc_pca:
-  input: dds_rds = rules.deseq2_fit.output.dds_rds,
+  input:
+    dds_rds = rules.deseq2_fit.output.dds_rds,
+    plot_theme_lib = workflow.source_path("scripts/lib/plot_theme.R"),
+    # ^-- explicitly re-run upon code change
   output: pca = f"{OUTPUT_DIR}/qc/pca.pdf",
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
   conda: "envs/qc_pca.yaml"
@@ -277,6 +280,8 @@ rule qc_pca:
 rule qc_volcano:
   input: results = rules.deseq2_contrast.output.results,
     qc_input_lib = workflow.source_path("scripts/lib/qc_input.R"),
+    # ^-- explicitly re-run upon code change
+    plot_theme_lib = rules.qc_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
   params:
     contrast_name = "{contrast}",
@@ -294,6 +299,8 @@ rule qc_ma:
   input:
     results = rules.deseq2_contrast.output.results,
     qc_input_lib = rules.qc_volcano.input.qc_input_lib,
+    # ^-- explicitly re-run upon code change
+    plot_theme_lib = rules.qc_volcano.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
   params:
     contrast_name = rules.qc_volcano.params.contrast_name,
@@ -353,7 +360,10 @@ def _gene_sets_of_interest_for_gsea(wildcards):
 
 rule gsea_postprocess_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
-  input: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
+  input:
+    gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds,
+    plot_theme_lib = rules.qc_pca.input.plot_theme_lib,
+    # ^-- explicitly re-run upon code change
   output:
     gsea_table_all = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",
     gsea_table_signif = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",

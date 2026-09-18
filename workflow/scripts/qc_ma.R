@@ -20,6 +20,7 @@ cat("Contrast:", contrast_name, "\n")
 cat("LFC type:", lfc_type, "\n")
 cat("padj threshold:", padj_threshold, "\n\n")
 
+source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["qc_input_lib"]])
 
 n_na <- sum(is.na(results_df$padj))
@@ -64,10 +65,9 @@ ma_plot <- ggplot(
   results_df,
   aes(x = baseMean, y = lfc_value, color = color, label = label)
 ) +
-  geom_point(alpha = 0.5, size = 2) +
+  geom_point(alpha = 0.5, size = default_point_size) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
   geom_text_repel(
-    size = 3,
     max.overlaps = Inf,
     min.segment.length = 0,
     segment.color = "grey40",
@@ -76,12 +76,6 @@ ma_plot <- ggplot(
   scale_x_log10() +
   scale_color_manual(
     values = c("Significant" = "red", "Not Significant" = "gray")
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text = element_text(size = 10),
-    axis.title = element_text(size = 12),
-    legend.position = "right"
   ) +
   labs(
     title = paste0("MA Plot: ", contrast_name, " (", lfc_type, ")"),
@@ -92,7 +86,7 @@ ma_plot <- ggplot(
 
 output_file <- snakemake@output[["ma"]]
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
-ggsave(output_file, ma_plot, width = 8, height = 6, dpi = 300)
+save_plot(output_file, ma_plot)
 cat("Saved:", output_file, "\n")
 
 cat("\n=== QC: MA Plot Complete ===\n")
