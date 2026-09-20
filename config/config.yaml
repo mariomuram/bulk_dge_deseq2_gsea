@@ -15,6 +15,7 @@ files:
       iHSC_GATA2R396Q_dCas9rtTA_lib15_2: "GATA2R396Q_nodox"
       iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_1: "GATA2R396Q_dox"
       iHSC_GATA2R396Q_dCas9rtTA_lib15_dox_2: "GATA2R396Q_dox"
+    annotation_columns: 1
   # Note: The above file actually contains columns for the below
   # samples as well. However, Eric did explicitly feed the version
   # from the separate file below to DESeq2 for these samples
@@ -41,6 +42,7 @@ files:
       iHSC_CBi08_dCas9rtTA_lib15_2: "parental_nodox"
       iHSC_CBi08_1: "parental_clean"
       iHSC_CBi08_2: "parental_clean"
+    annotation_columns: 1
 
 # The design is always the full crossing (all main effects and
 # interactions) of every parsed sample field -- built and fit

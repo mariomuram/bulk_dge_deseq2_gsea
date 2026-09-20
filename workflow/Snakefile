@@ -37,7 +37,11 @@ for file_key, file_info in FILES.items():
       )
     SAMPLES_INFO[sample_id] = label
     SAMPLE_TO_FILE[sample_id] = {"file_key": file_key, "path": file_path}
-    FILE_TO_SAMPLES[file_key] = {"path": file_path, "samples": file_samples}
+    FILE_TO_SAMPLES[file_key] = {
+      "path": file_path,
+      "samples": file_samples,
+      "annotation_columns": file_info.get("annotation_columns", 0),
+    }
 
 # --- Parse every sample label into its fields -----------------------
 
