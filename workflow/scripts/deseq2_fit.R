@@ -78,11 +78,37 @@ seen_genes <- NULL
 
 for (file_path in count_files) {
   cat("Reading:", file_path, "\n")
+
+  file_idx <- which(sapply(file_to_samples,
+                           function(file) { if ("path" %in% names(file))
+                                              return(file$path)
+                                            return(NULL) })
+                      == file_path)
+  if (length(file_idx) == 0L) {
+    stop(
+      "ERROR: the following file path is not listed in the file-to-samples ",
+      "mapping: ", file_path
+    )
+  } else {
+    if (length(file_idx) > 1L) {
+      stop(
+        "ERROR: the following file path is listed several times in the",
+        "file-to-samples mapping:",
+        paste(names(file_to_samples)[file_idx], collapse = ", ")
+      )
+    }
+  }
+  stopifnot(length(file_idx) == 1L)
+  file_key <- names(file_to_samples)[[file_idx]]
+  file_samples <- names(file_to_samples[[file_idx]]$samples)
+  n_annotation_cols <- file_to_samples[[file_idx]]$annotation_columns
+
   df <- read_tsv(file_path, show_col_types = FALSE)
-  
-  # Assuming first column is gene_id, second is (unused) annotation
+
+  # First column is gene_id; the next `n_annotation_cols` columns are
+  # unused annotation (e.g. RSEM's transcript_id(s)); the rest are samples.
   gene_col <- df[[1]]
-  sample_cols <- colnames(df)[-c(1, 2)]
+  sample_cols <- colnames(df)[-seq_len(1 + n_annotation_cols)]
   file_idx <- which(sapply(file_to_samples,
                            function(file) { if ("path" %in% names(file))
                                               return(file$path)
