@@ -5,6 +5,7 @@ channels:
 dependencies:
   - r-base
   - bioconductor-clusterprofiler
+  - bioconductor-org.hs.eg.db
   - bioconductor-fgsea
   - r-msigdbr
   - r-readr

@@ -5,7 +5,8 @@
 # logic doesn't depend on which database the enrichment step uses.
 library(dplyr)
 
-validate_and_rank <- function(results_df, ranking_stat) {
+validate_and_rank <- function(results_df, ranking_stat,
+                              gene_id_style="SYMBOL") {
   stat_col <- ranking_stat
   cat("Ranking statistic:", stat_col, "\n")
   if (!(stat_col %in% colnames(results_df))) {
@@ -47,6 +48,10 @@ validate_and_rank <- function(results_df, ranking_stat) {
 
   ranking <- results_df[[stat_col]]
   names(ranking) <- results_df$gene_id
+  if (gene_id_style == "ENSEMBL") {
+    # Clean version suffixes
+    names(ranking) <- sub("\\.\\d+$", "", names(ranking))
+  }
   ranking <- sort(ranking, decreasing = TRUE)
 
   cat("\nGenes ranked:", length(ranking), "\n")

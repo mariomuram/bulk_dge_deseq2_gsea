@@ -27,6 +27,7 @@ contrast_name <- snakemake@params[["contrast_name"]]
 gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
 ontology <- snakemake@params[["ontology"]]
+gene_id_style <- snakemake@params[["gene_id_style"]]
 ranking_stat <- snakemake@params[["ranking_stat"]]
 min_set_size <- snakemake@params[["min_set_size"]]
 max_set_size <- snakemake@params[["max_set_size"]]
@@ -35,7 +36,12 @@ padj_threshold <- snakemake@params[["padj_threshold"]]
 cat("Contrast:", contrast_name, "\n")
 cat("Analysis name:", gsea_name, "\n")
 cat("Database:", database, "\n")
-cat("Ontology:", ontology, "\n\n")
+cat("Ontology:", ontology, "\n")
+cat("Gene ID style:", gene_id_style, "\n")
+cat("Ranking stat:", ranking_stat, "\n")
+cat("Min set size:", min_set_size, "\n")
+cat("Max set size:", max_set_size, "\n")
+cat("Adjusted p-value threshold:", padj_threshold, "\n\n")
 
 if (database != "GO") {
   stop(
@@ -46,12 +52,10 @@ if (database != "GO") {
 }
 
 # --- Load DESeq2 results ---------------------------------------------
-
 results_df <- read_tsv(snakemake@input[["results"]], show_col_types = FALSE)
 
 # --- Build ranking (shared helper) -----------------------------------
-# TODO: Adjust!
-ranking <- validate_and_rank(results_df, ranking_stat)
+ranking <- validate_and_rank(results_df, ranking_stat, gene_id_style)
 
 # --- Run GSEA -----------------------------------------------------
 cat("\nRunning gseGO (ontology:", ontology, ")...\n")
@@ -67,7 +71,7 @@ cat("\nRunning gseGO (ontology:", ontology, ")...\n")
 gsea_result <- gseGO(
   geneList = ranking,
   OrgDb = org.Hs.eg.db,
-  keyType = "SYMBOL",
+  keyType = gene_id_style,
   ont = ontology,
   minGSSize = min_set_size,
   maxGSSize = max_set_size,
