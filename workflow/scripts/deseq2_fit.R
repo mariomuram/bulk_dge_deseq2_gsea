@@ -37,28 +37,37 @@ count_files <- snakemake@input[["count_files"]]  # vector of file paths
 file_to_samples <- snakemake@params[["file_to_samples"]]  # file path -> samples mapping
 
 if (length(count_files) == 1L) {
-
   cat("Reading count matrix...\n")
-
 } else {
-
   cat("Reading count matrices from multiple files...\n")
-  
-  # Validate: no sample in multiple files
-  sample_counts <- table(
-    do.call(c, lapply(file_to_samples,
-                      function(file) { names(file$samples) }))
-  )
-  duplicated_samples <- names(sample_counts)[sample_counts > 1]
-  if (length(duplicated_samples) > 0) {
+  cat("Expected files:", paste(count_files, collapse = ", "), "\n")
+}
+
+# Extract all samples from all files
+all_samples <- do.call(c, lapply(file_to_samples,
+                                  function(file) { names(file$samples) }))
+
+# Check for duplicates within each file
+for (i in seq_along(file_to_samples)) {
+  file_samples <- names(file_to_samples[[i]]$samples)
+  duplicated_in_file <- file_samples[duplicated(file_samples)]
+  if (length(duplicated_in_file) > 0) {
     stop(
-      "ERROR: the following sample(s) appear in more than one file: ",
-      paste(duplicated_samples, collapse = ", ")
+      "ERROR: the following sample(s) appear multiple times in file ",
+      count_files[i], ": ",
+      paste(duplicated_in_file, collapse = ", ")
     )
   }
-  
-  cat("Expected files:", paste(count_files, collapse = ", "), "\n")
+}
 
+# Check for duplicates across files
+sample_counts <- table(all_samples)
+duplicated_samples <- names(sample_counts)[sample_counts > 1]
+if (length(duplicated_samples) > 0) {
+  stop(
+    "ERROR: the following sample(s) appear in more than one file: ",
+    paste(duplicated_samples, collapse = ", ")
+  )
 }
 
 cat("Total samples to load:", length(sample_counts), "\n\n")
