@@ -203,6 +203,15 @@ wildcard_constraints:
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
 
+# Only aggregate GSEA results if there's more than one contrast
+_AGGREGATE_GSEA_OUTPUTS = []
+if len(CONTRAST_NAMES) > 1:
+  _AGGREGATE_GSEA_OUTPUTS = [
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz", gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
+           gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz", gsea=GSEA_NAMES),
+  ]
 rule all:
   input:
     # DESeq2 results
@@ -223,12 +232,8 @@ rule all:
     expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
            contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
            plot = { "plot", "ridge_plot", "lollipop_plot" }),
-    # GSEA summary results
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz", gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
-           gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
-           gsea=GSEA_NAMES),
+    # GSEA summary results (only if multiple contrasts)
+    *_AGGREGATE_GSEA_OUTPUTS,
 
 rule deseq2_fit:
   input: count_files = COUNT_FILE_PATHS,
