@@ -4,6 +4,8 @@ import parse
 import re
 from pathlib import Path
 import itertools
+import string
+import warnings
 
 # Load configuration
 configfile: "config/config.yaml"
@@ -11,6 +13,7 @@ configfile: "config/config.yaml"
 OUTPUT_DIR = config["output_dir"]
 DESIGN = config["design"]
 LABEL_PATTERN = config["sample_label_pattern"]
+CONDITION_PATTERN = config.get("sample_condition_pattern", LABEL_PATTERN)
 
 # --- Parse the new files structure and flatten samples ---------------
 
@@ -65,6 +68,66 @@ for sample, label in SAMPLES_INFO.items():
   SAMPLE_FIELDS[sample] = fields
 
 FIELD_NAMES = list(next(iter(SAMPLE_FIELDS.values())).keys())
+
+# --- Split condition and confounder fields --------------------------
+CONDITION_FIELD_NAMES = [
+  name for _, name, _, _ in string.Formatter().parse(CONDITION_PATTERN)
+  if name
+]
+unknown_condition_fields = set(CONDITION_FIELD_NAMES) - set(FIELD_NAMES)
+if unknown_condition_fields:
+  raise ValueError(
+    f"`sample_condition_pattern` references field(s) not produced by "
+    f"`sample_label_pattern`: {sorted(unknown_condition_fields)}."
+  )
+
+configured_confounder_fields = DESIGN.get("confounders")
+if configured_confounder_fields is None:
+  CONFOUNDER_FIELD_NAMES = sorted(set(FIELD_NAMES) - set(CONDITION_FIELD_NAMES))
+else:
+  CONFOUNDER_FIELD_NAMES = list(configured_confounder_fields)
+  unknown_confounder_fields = set(CONFOUNDER_FIELD_NAMES) - set(FIELD_NAMES)
+  if unknown_confounder_fields:
+    raise ValueError(
+      f"`design.confounders` references field(s) not produced by "
+      f"`sample_label_pattern`: {sorted(unknown_confounder_fields)}."
+    )
+
+overlap = set(CONDITION_FIELD_NAMES) & set(CONFOUNDER_FIELD_NAMES)
+if overlap:
+  raise ValueError(
+    f"Field(s) {sorted(overlap)} are claimed by both "
+    f"`sample_condition_pattern` and `design.confounders`; a field must "
+    f"be exactly one of the two."
+  )
+unclassified_fields = (
+  set(FIELD_NAMES) - set(CONDITION_FIELD_NAMES) - set(CONFOUNDER_FIELD_NAMES)
+)
+if unclassified_fields:
+  warnings.warn(
+    f"Field(s) {sorted(unclassified_fields)} are produced by "
+    f"`sample_label_pattern` but are neither part of "
+    f"`sample_condition_pattern` nor listed in `design.confounders`. "
+    "Dropping..."
+  )
+  FIELD_NAMES = list(set(FIELD_NAMES) - set(unclassified_fields))
+  for sample in SAMPLE_FIELDS:
+    for unclassified_field in (set(SAMPLE_FIELDS[sample].keys())
+                               & unclassified_fields):
+      del SAMPLE_FIELDS[sample][unclassified_field]
+
+# SAMPLES_INFO currently holds the raw sample_label_pattern string
+# (needed just above to parse SAMPLE_FIELDS). Replace it with the
+# derived condition string: everything downstream -- ALL_CONDITIONS,
+# contrast validation, CONDITION_FIELDS, and the samples_info param
+# handed to deseq2_fit.R (which becomes coldata$condition) -- must
+# see only the biological condition, never a confounder-inclusive
+# label.
+for sample in SAMPLES_INFO:
+  fields = SAMPLE_FIELDS[sample]
+  SAMPLES_INFO[sample] = CONDITION_PATTERN.format(
+    **{f: fields[f] for f in CONDITION_FIELD_NAMES}
+  )
 
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
@@ -135,19 +198,20 @@ COUNT_FILE_PATHS = sorted(
 # --- (possibly incomplete) factorial. ----------------------------
 
 CONDITION_FIELDS = {
-  cond: SAMPLE_FIELDS[sample] for sample, cond in SAMPLES_INFO.items()
+  cond: {f: SAMPLE_FIELDS[sample][f] for f in CONDITION_FIELD_NAMES}
+  for sample, cond in SAMPLES_INFO.items()
 }
 
 def group_for(assignment):
   for cond, fields in CONDITION_FIELDS.items():
-    if all(fields[f] == assignment[f] for f in FIELD_NAMES):
+    if all(fields[f] == assignment[f] for f in CONDITION_FIELD_NAMES):
       return cond
   return None
 
 def canonical_patterns():
   patterns = []
-  for r in range(1, len(FIELD_NAMES) + 1):
-    for term in itertools.combinations(FIELD_NAMES, r):
+  for r in range(1, len(CONDITION_FIELD_NAMES) + 1):
+    for term in itertools.combinations(CONDITION_FIELD_NAMES, r):
       non_ref_levels = {
         f: [v for v in sorted({fl[f] for fl in CONDITION_FIELDS.values()})
             if v != REFERENCE_LEVELS[f]]
@@ -157,7 +221,7 @@ def canonical_patterns():
         chosen = dict(zip(term, combo))
         pattern, complete = {}, True
         for corner in itertools.product([False, True], repeat=len(term)):
-          assignment = dict(REFERENCE_LEVELS)
+          assignment = {f: REFERENCE_LEVELS[f] for f in CONDITION_FIELD_NAMES}
           for f, at_chosen in zip(term, corner):
             assignment[f] = chosen[f] if at_chosen else REFERENCE_LEVELS[f]
           cond = group_for(assignment)
@@ -241,6 +305,8 @@ rule deseq2_fit:
     sample_fields = SAMPLE_FIELDS,
     reference_levels = REFERENCE_LEVELS,
     file_to_samples = FILE_TO_SAMPLES,
+    condition_fields = CONDITION_FIELD_NAMES,
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
   log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
   conda: "envs/deseq2_fit.yaml"
@@ -255,7 +321,9 @@ def _dds_for_contrast(wildcards):
 
 rule deseq2_relevel:
   input: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
-  params: reference_factor = "{reference_factor}",
+  params:
+    reference_factor = "{reference_factor}",
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
   output:
     dds_rds =
       f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{{reference_factor}}.rds",

@@ -97,7 +97,25 @@ if (contrast_type == "pairwise") {
     }
   )
 
-  coef_index <- which(levels_condition == numerator)
+  n_condition_levels <- length(levels_condition)
+  n_total_coefs <- length(resultsNames(dds))
+  if (n_total_coefs < n_condition_levels) {
+    stop(
+      "ERROR: resultsNames(dds) has ", n_total_coefs, " entries, fewer ",
+      "than the ", n_condition_levels, " condition levels. Positional ",
+      "coefficient resolution is unsafe here; check that ",
+      "deseq2_relevel.R fit '~ <confounders> + condition' as expected."
+    )
+  }
+  if (resultsNames(dds)[1] != "Intercept") {
+    stop(
+      "ERROR: expected resultsNames(dds)[1] == 'Intercept', got '",
+      resultsNames(dds)[1], "'. Positional coefficient resolution is ",
+      "unsafe here; investigate before trusting downstream results."
+    )
+  }
+  n_confounder_coefs <- n_total_coefs - n_condition_levels
+  coef_index <- n_confounder_coefs + which(levels_condition == numerator)
   coef_name <- resultsNames(dds)[coef_index]
 
 } else if (contrast_type == "groups") {

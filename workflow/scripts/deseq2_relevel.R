@@ -23,6 +23,7 @@ cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 dds_file <- snakemake@input[["dds_rds"]]
 reference_factor <- snakemake@params[["reference_factor"]]
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
 
 cat("Loading primary DESeqDataSet:", dds_file, "\n")
 dds <- readRDS(dds_file)
@@ -41,7 +42,11 @@ colData(dds)$condition <- relevel(
   factor(colData(dds)$condition), ref = reference_factor
 )
 
-design(dds) <- ~condition
+relevel_formula <- as.formula(
+  paste("~", paste(c(confounder_field_names, "condition"), collapse = " + "))
+)
+cat("Releveled design formula:", deparse(relevel_formula), "\n")
+design(dds) <- relevel_formula
 
 cat("\nRerunning nbinomWaldTest() only (dispersions and size",
     "factors reused from the primary fit)...\n")

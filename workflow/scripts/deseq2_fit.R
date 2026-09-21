@@ -212,6 +212,19 @@ counts_matrix <- counts_matrix[, names(samples_info), drop = FALSE]
 field_names <- names(sample_fields[[1]])
 cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
+condition_field_names <- unlist(snakemake@params[["condition_fields"]])
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+cat("Condition fields (crossed):", paste(condition_field_names,
+                                         collapse = ", "), "\n")
+if (length(confounder_field_names) > 0) {
+  cat("Confounder fields (additive only):",
+      paste(confounder_field_names, collapse = ", "), "\n")
+} else {
+  cat("No confounder fields configured.\n")
+}
+stopifnot(setequal(c(condition_field_names, confounder_field_names),
+                   field_names))
+
 coldata <- data.frame(
   sample = colnames(counts_matrix),
   condition = unlist(samples_info)[colnames(counts_matrix)],
@@ -272,43 +285,77 @@ for (f in names(reference_levels)) {
 # --- Build the full-crossing design matrix, dropping any -----------
 # --- structurally-empty (all-zero) columns. -------------------------
 
-full_formula <- as.formula(
-  paste("~", paste(field_names, collapse = "*"))
+condition_formula <- as.formula(
+  paste("~", paste(condition_field_names, collapse = "*"))
 )
-cat("\nFull-crossing formula (before rank check):",
-    deparse(full_formula), "\n")
+cat("\nCondition-crossing formula (before rank check):",
+    deparse(condition_formula), "\n")
 
-full_mat <- model.matrix(full_formula, data = coldata)
-empty_cols <- colSums(full_mat != 0) == 0
+condition_mat <- model.matrix(condition_formula, data = coldata)
+empty_cols <- colSums(condition_mat != 0) == 0
 
 if (any(empty_cols)) {
   cat(
-    "\nNOTE: the parsed fields do not form a complete factorial",
-    "-- the following coefficient(s) have no observations and",
-    "are being dropped before fitting (expected, not an error,",
-    "e.g. a construct-free condition existing for only one",
-    "background):\n"
+    "\nNOTE: the parsed condition fields do not form a complete",
+    "factorial -- the following coefficient(s) have no",
+    "observations and are being dropped before fitting (expected,",
+    "not an error, e.g. a construct-free condition existing for",
+    "only one background):\n"
   )
-  print(colnames(full_mat)[empty_cols])
-  full_mat <- full_mat[, !empty_cols, drop = FALSE]
+  print(colnames(condition_mat)[empty_cols])
+  condition_mat <- condition_mat[, !empty_cols, drop = FALSE]
 }
 
-cat("\nFinal design matrix columns (", ncol(full_mat), "):\n", sep = "")
-print(colnames(full_mat))
-
 n_distinct_conditions <- length(unique(coldata$condition))
-if (ncol(full_mat) != n_distinct_conditions) {
+if (ncol(condition_mat) != n_distinct_conditions) {
   stop(
-    "ERROR: final design matrix has ", ncol(full_mat),
+    "ERROR: cleaned condition-crossing matrix has ", ncol(condition_mat),
     " columns but there are ", n_distinct_conditions,
-    " distinct observed conditions. The model is not saturated ",
-    "relative to the observed groups -- this would break the ",
-    "relevel-based contrast extraction used elsewhere in this ",
-    "pipeline. This should not happen for a matrix built purely ",
-    "from crossing the parsed fields; investigate before ",
+    " distinct observed conditions. The condition part of the model ",
+    "is not saturated relative to the observed groups -- this would ",
+    "break the relevel-based contrast extraction used elsewhere in ",
+    "this pipeline. This should not happen for a matrix built purely ",
+    "from crossing the parsed condition fields; investigate before ",
     "trusting downstream results."
   )
 }
+
+# Confounders enter additively only -- never crossed with condition
+# or with each other -- so they shift the fitted baseline without
+# changing which linear combination of condition columns identifies
+# which comparison. This is what keeps every contrast apeglm-
+# shrinkable exactly as before confounders were introduced.
+if (length(confounder_field_names) > 0) {
+  confounder_formula <- as.formula(
+    paste("~", paste(confounder_field_names, collapse = " + "))
+  )
+  cat("\nConfounder formula (additive, before rank check):",
+      deparse(confounder_formula), "\n")
+  confounder_mat <- model.matrix(confounder_formula, data = coldata)
+  confounder_mat <- confounder_mat[
+    , colnames(confounder_mat) != "(Intercept)", drop = FALSE
+  ]
+  empty_confounder_cols <- colSums(confounder_mat != 0) == 0
+  if (any(empty_confounder_cols)) {
+    # Not expected: every confounder level was observed in at least
+    # one sample by construction (it came from parsing an actual
+    # sample label). An all-zero column here means a coding bug,
+    # not a legitimate missing combination.
+    stop(
+      "ERROR: confounder design matrix has unexpected all-zero ",
+      "column(s): ",
+      paste(colnames(confounder_mat)[empty_confounder_cols], collapse = ", "),
+      ". Investigate before trusting downstream results."
+    )
+  }
+  full_mat <- cbind(condition_mat, confounder_mat)   # condition (incl. Intercept) first
+} else {
+  full_mat <- condition_mat
+}
+stopifnot(colnames(full_mat)[1] == "(Intercept)")
+
+cat("\nFinal design matrix columns (", ncol(full_mat), "):\n", sep = "")
+print(colnames(full_mat))
 
 # --- Build DESeqDataSet ------------------------------------------
 # design is a placeholder (~condition, always full rank by
