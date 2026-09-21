@@ -352,6 +352,7 @@ rule qc_pca:
   params:
     color = config["pca"]["color"],
     shape = config["pca"]["shape"],
+    palette = config["pca"].get("palette", "Dark2")
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
   conda: "envs/qc_pca.yaml"
   script: "scripts/qc_pca.R"

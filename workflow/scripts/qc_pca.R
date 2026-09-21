@@ -18,6 +18,7 @@ source(snakemake@input[["plot_theme_lib"]])
 # Extract parameterized variables
 color_var <- snakemake@params[["color"]]
 shape_var <- snakemake@params[["shape"]]
+palette <- snakemake@params[["palette"]]
 color_label <- unname(color_var[[1]])
 color_var <- names(color_var)[1]
 shape_label <- unname(shape_var[[1]])
@@ -42,13 +43,13 @@ pca_data <- plotPCA(
 )
 percent_var <- round(100 * attr(pca_data, "percentVar"))
 
-# TODO: Color scale! Play with scale.
 pca_plot <- ggplot(
   pca_data,
   aes(x = PC1, y = PC2, color = .data[[color_var]],
       shape = .data[[shape_var]])
 ) +
   geom_point(size = default_point_size, alpha = 0.8) +
+  scale_color_brewer(palette = palette) +
   labs(
     title = "PCA (all samples)",
     x = paste0("PC1: ", percent_var[1], "% variance"),
