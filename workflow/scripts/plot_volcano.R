@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# QC: Volcano plot for a single contrast, unshrunk or shrunk LFC.
+# Plot: Volcano plot for a single contrast, unshrunk or shrunk LFC.
 
 library(ggplot2)
 library(dplyr)
@@ -12,10 +12,10 @@ logfile <- file(logfile, open = "w")
 sink(logfile, type = "output")
 sink(logfile, type = "message", append = TRUE)
 
-cat("=== QC: Volcano Plot ===\n")
+cat("=== Plot: Volcano Plot ===\n")
 
 source(snakemake@input[["plot_theme_lib"]])
-source(snakemake@input[["qc_input_lib"]])
+source(snakemake@input[["plot_input_lib"]])
 log2fc_threshold <- snakemake@params[["log2fc_threshold"]]
 cat("log2FC threshold:", log2fc_threshold, "\n\n")
 
@@ -78,7 +78,7 @@ dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
 save_plot(output_file, volcano_plot)
 cat("Saved:", output_file, "\n")
 
-cat("\n=== QC: Volcano Plot Complete ===\n")
+cat("\n=== Plot: Volcano Plot Complete ===\n")
 sink(type = "message")
 sink()
 close(logfile)

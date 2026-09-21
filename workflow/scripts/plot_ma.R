@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# QC: MA plot for a single contrast, unshrunk or shrunk LFC.
+# Plot: MA plot for a single contrast, unshrunk or shrunk LFC.
 
 library(ggplot2)
 library(dplyr)
@@ -12,7 +12,7 @@ logfile <- file(logfile, open = "w")
 sink(logfile, type = "output")
 sink(logfile, type = "message", append = TRUE)
 
-cat("=== QC: MA Plot ===\n")
+cat("=== Plot: MA Plot ===\n")
 contrast_name <- snakemake@params[["contrast_name"]]
 lfc_type <- snakemake@params[["lfc_type"]]  # "unshrunk" or "shrunk"
 padj_threshold <- snakemake@params[["padj_threshold"]]
@@ -21,7 +21,7 @@ cat("LFC type:", lfc_type, "\n")
 cat("padj threshold:", padj_threshold, "\n\n")
 
 source(snakemake@input[["plot_theme_lib"]])
-source(snakemake@input[["qc_input_lib"]])
+source(snakemake@input[["plot_input_lib"]])
 
 n_na <- sum(is.na(results_df$padj))
 if (n_na > 0) {
@@ -89,7 +89,7 @@ dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
 save_plot(output_file, ma_plot)
 cat("Saved:", output_file, "\n")
 
-cat("\n=== QC: MA Plot Complete ===\n")
+cat("\n=== Plot: MA Plot Complete ===\n")
 sink(type = "message")
 sink()
 close(logfile)

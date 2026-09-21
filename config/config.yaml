@@ -44,6 +44,12 @@ files:
       iHSC_CBi08_2: "parental_clean"
     annotation_columns: 1
 
+pca:
+  color:
+    dox: "Dox status"
+  shape:
+    background: "Background"
+
 # The design is always the full crossing (all main effects and
 # interactions) of every parsed sample field -- built and fit
 # as an explicit model matrix in deseq2_fit.R, not a formula
