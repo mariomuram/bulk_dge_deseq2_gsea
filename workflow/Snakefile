@@ -289,7 +289,8 @@ rule qc_pca:
   script: "scripts/qc_pca.R"
 
 rule plot_volcano:
-  input: results = rules.deseq2_contrast.output.results,
+  input:
+    results = rules.deseq2_contrast.output.results,
     plot_input_lib = workflow.source_path("scripts/lib/plot_input.R"),
     # ^-- explicitly re-run upon code change
     plot_theme_lib = rules.qc_pca.input.plot_theme_lib,
@@ -301,7 +302,8 @@ rule plot_volcano:
     log2fc_threshold = rules.deseq2_contrast.params.log2fc_threshold,
     genes_of_interest = GENES_OF_INTEREST,
   output:
-    volcano = f"{OUTPUT_DIR}/deseq2/{{contrast}}_volcano_plot_{{lfc_type}}.pdf",
+    volcano =
+      f"{OUTPUT_DIR}/deseq2/{{contrast}}_volcano_plot_{{lfc_type}}.pdf",
   log: f"{OUTPUT_DIR}/logs/plot_volcano_{{contrast}}_{{lfc_type}}.log"
   conda: "envs/plot_volcano.yaml"
   script: "scripts/plot_volcano.R"
@@ -318,7 +320,7 @@ rule plot_ma:
     lfc_type = rules.plot_volcano.params.lfc_type,
     padj_threshold = rules.plot_volcano.params.padj_threshold,
     genes_of_interest = rules.plot_volcano.params.genes_of_interest,
-  output: ma = f"{OUTPUT_DIR}/plot/{{contrast}}_ma_plot_{{lfc_type}}.pdf",
+  output: ma = f"{OUTPUT_DIR}/deseq2/{{contrast}}_ma_plot_{{lfc_type}}.pdf"
   log: f"{OUTPUT_DIR}/logs/plot_ma_{{contrast}}_{{lfc_type}}.log"
   conda: "envs/plot_ma.yaml"
   script: "scripts/plot_ma.R"
