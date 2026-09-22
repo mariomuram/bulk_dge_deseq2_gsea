@@ -61,24 +61,28 @@ results_df <- results_df %>%
     )
   )
 
+lfc_max <- max(abs(results_df$lfc_value), na.rm = TRUE)
 ma_plot <- ggplot(
   results_df,
   aes(x = baseMean, y = lfc_value, color = color, label = label)
 ) +
   geom_point(alpha = 0.5, size = default_point_size) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-  geom_text_repel(
-    max.overlaps = Inf,
-    min.segment.length = 0,
-    segment.color = "grey40",
-    show.legend = FALSE
+  geom_label_repel(fill="white", alpha=.5,
+    size = default_text_size, fontface = "bold", box.padding = .5,
+    point.padding = 0, point.size = default_point_size, force = 3,
+    force_pull = .8, max.iter = 1e6, max.time = 60,
+    max.overlaps = Inf, min.segment.length = 0, segment.color = "grey40",
+    segment.size = 0.4, seed = 42L, show.legend = FALSE
   ) +
   scale_x_log10() +
+  # +10% breathing room past the extremes
+  coord_cartesian(ylim = c(-lfc_max, lfc_max) * 1.05) +
   scale_color_manual(
     values = c("Significant" = "red", "Not Significant" = "gray")
   ) +
   labs(
-    title = paste0("MA Plot: ", contrast_name, " (", lfc_type, ")"),
+    title = paste0(contrast_name, " (", lfc_type, ")"),
     x = "Mean Expression (baseMean, log10 scale)",
     y = lfc_label,
     color = paste0("padj < ", padj_threshold)
