@@ -18,6 +18,7 @@ source(snakemake@input[["plot_theme_lib"]])
 # Extract parameterized variables
 color_var <- snakemake@params[["color"]]
 shape_var <- snakemake@params[["shape"]]
+label_var <- snakemake@params[["label"]]
 palette <- snakemake@params[["palette"]]
 color_label <- unname(color_var[[1]])
 color_var <- names(color_var)[1]
@@ -56,6 +57,18 @@ pca_plot <- ggplot(
     y = paste0("PC2: ", percent_var[2], "% variance"),
     color = color_label, shape = shape_label
   )
+if (!is.null(label_var)) {
+  library(ggrepel)
+  pca_plot <- pca_plot +
+    geom_label_repel(
+      aes(label = .data[[label_var]]), fill = "white", alpha = .5,
+      size = default_text_size, fontface = "bold", box.padding = .5,
+      point.padding = 0, point.size = default_point_size, force = 3,
+      force_pull = .8, max.iter = 1e6, max.time = 60, max.overlaps = Inf,
+      min.segment.length = 0, segment.color = "grey40", segment.size = 0.4,
+      seed = 42L, show.legend = FALSE
+    )
+}
 
 output_file <- snakemake@output[["pca"]]
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)

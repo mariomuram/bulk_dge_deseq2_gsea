@@ -222,8 +222,8 @@ if (length(confounder_field_names) > 0) {
 } else {
   cat("No confounder fields configured.\n")
 }
-stopifnot(setequal(c(condition_field_names, confounder_field_names),
-                   field_names))
+stopifnot(all(union(condition_field_names, confounder_field_names)
+              %in% field_names))
 
 coldata <- data.frame(
   sample = colnames(counts_matrix),

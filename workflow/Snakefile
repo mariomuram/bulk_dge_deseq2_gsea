@@ -103,12 +103,21 @@ if overlap:
 unclassified_fields = (
   set(FIELD_NAMES) - set(CONDITION_FIELD_NAMES) - set(CONFOUNDER_FIELD_NAMES)
 )
+PCA_LABEL_FIELD = config["pca"].get("label", None)
+if PCA_LABEL_FIELD is not None:
+  if PCA_LABEL_FIELD not in FIELD_NAMES:
+    raise ValueError(
+      f"`pca.label` references field not produced by `sample_label_pattern`: "
+      f"{PCA_LABEL_FIELD}."
+    )
+  unclassified_fields = unclassified_fields - {PCA_LABEL_FIELD}
+
 if unclassified_fields:
   warnings.warn(
     f"Field(s) {sorted(unclassified_fields)} are produced by "
-    f"`sample_label_pattern` but are neither part of "
-    f"`sample_condition_pattern` nor listed in `design.confounders`. "
-    "Dropping..."
+    "`sample_label_pattern` but are neither part of "
+    "`sample_condition_pattern` nor listed in `design.confounders` or set as "
+    "`pca.label`. Dropping..."
   )
   FIELD_NAMES = list(set(FIELD_NAMES) - set(unclassified_fields))
   for sample in SAMPLE_FIELDS:
@@ -352,7 +361,8 @@ rule qc_pca:
   params:
     color = config["pca"]["color"],
     shape = config["pca"]["shape"],
-    palette = config["pca"].get("palette", "Dark2")
+    label = PCA_LABEL_FIELD,
+    palette = config["pca"].get("palette", "Dark2"),
   log: f"{OUTPUT_DIR}/logs/qc_pca.log"
   conda: "envs/qc_pca.yaml"
   script: "scripts/qc_pca.R"
