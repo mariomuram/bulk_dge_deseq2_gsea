@@ -26,22 +26,23 @@ results_df <- results_df %>%
   mutate(
     lfc_value = .data[[lfc_col]],
     neg_log10_padj = -log10(padj),
-    color = case_when(
-      padj < padj_threshold & lfc_value >= log2fc_threshold ~ "Up",
-      padj < padj_threshold & lfc_value <= -log2fc_threshold ~ "Down",
+    # Overwrites the sign-only `category` from plot_input_lib with the
+    # stricter (padj + |LFC|) classification volcano plots conventionally use.
+    category = case_when(
+      category %in% "Up" & lfc_value >= log2fc_threshold ~ "Up",
+      category %in% "Down" & lfc_value <= -log2fc_threshold ~ "Down",
       TRUE ~ "Not Significant"
-    )
+    ) %>% factor(levels = c("Up", "Down", "Not Significant"))
   )
 cat(
   "Excluded", n_before - nrow(results_df),
   "gene(s) with NA padj (cannot plot -log10(NA)).\n"
 )
 
-# TODO: Annotate up and down counts (within quadrants) + total n_genes (in title?)!
 lfc_max <- max(abs(results_df$lfc_value), na.rm = TRUE)
 volcano_plot <- ggplot(
-  results_df,
-  aes(x = lfc_value, y = neg_log10_padj, color = color, label = label)
+  order_for_plotting(results_df),
+  aes(x = lfc_value, y = neg_log10_padj, color = category, label = label)
 ) +
   geom_point(alpha = 0.6, size = default_point_size) +
   geom_vline(
@@ -61,13 +62,8 @@ volcano_plot <- ggplot(
   ) +
   # +10% breathing room past the extremes
   coord_cartesian(xlim = c(-lfc_max, lfc_max) * 1.05) +
-  scale_color_manual(
-    values = c(
-      # TODO: Use up and down colors!
-      "Up" = "#d73027", "Down" = "#4575b4",
-      "Not Significant" = "#cccccc"
-    )
-  ) +
+  scale_color_manual(values = category_colors,
+                     labels = get_category_labels(results_df)) +
   labs(
     title = paste0(contrast_name, " (", lfc_type, ")"),
     x = lfc_label,

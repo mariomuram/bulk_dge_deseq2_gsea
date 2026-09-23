@@ -155,12 +155,12 @@ gsea:
       - 'HALLMARK_TGF_BETA_SIGNALING'
       - 'HALLMARK_UV_RESPONSE_DNA'
 
+colors:
+  direction:
+    down: '#2166ac'
+    none: '#a0a0a0'
+    up: '#b2182b'
 gsea_plots:
-  colors:
-    direction:
-      down: '#2166ac'
-      none: '#ffffff'
-      up: '#b2182b'
   lollipop_plot:
     # Either `size` (# genes in set) or `count` (# driver genes);
     # default: `count`
