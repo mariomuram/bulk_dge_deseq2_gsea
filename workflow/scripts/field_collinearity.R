@@ -27,6 +27,7 @@
 library(DESeq2)
 library(ggplot2)
 library(smartcor)
+library(readr)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -72,7 +73,7 @@ if (n_valid == 0) {
 
 table_file <- snakemake@output[["table"]]
 dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
-write_tsv_gz(collinearity, table_file)
+readr::write_tsv(collinearity, table_file)
 cat("Saved:", table_file, "\n")
 
 # Order: condition, confounder, other.

@@ -183,8 +183,7 @@ def infer_field_type(values):
   # Rule 3: Character/string (see below)
 
   # Rule 4: Logical/boolean
-  if all(isinstance(v, bool) for v in unique_vals):
-    return "binary"
+  # Handled by rule 2 already.
 
   # Try numeric coercion for rules 5 and 6. This must run before falling
   # back to "categorical": every value here is a Python str (parsed from a

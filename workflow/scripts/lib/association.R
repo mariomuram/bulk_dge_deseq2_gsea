@@ -110,9 +110,3 @@ compute_associations <- function(data, types) {
     n_complete = tidy_matrix$n_complete, stringsAsFactors = FALSE
   )
 }
-
-write_tsv_gz <- function(df, path) {
-  con <- gzfile(path, "w")
-  on.exit(close(con))
-  utils::write.table(df, con, sep = "\t", quote = FALSE, row.names = FALSE)
-}

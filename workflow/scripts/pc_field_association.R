@@ -14,6 +14,7 @@ library(DESeq2)
 library(ggplot2)
 library(patchwork)
 library(smartcor)
+library(readr)
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -148,7 +149,7 @@ names(roles) <- names(field_types)
 
 table_file <- snakemake@output[["table"]]
 dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
-write_tsv_gz(assoc, table_file)
+readr::write_tsv(assoc, table_file)
 cat("Saved:", table_file, "\n")
 
 output_file <- snakemake@output[["heatmap"]]

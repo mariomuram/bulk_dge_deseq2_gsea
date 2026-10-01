@@ -7,3 +7,4 @@ dependencies:
   - bioconductor-deseq2
   - r-ggplot2
   - r-smartcor
+  - r-readr

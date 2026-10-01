@@ -8,3 +8,4 @@ dependencies:
   - r-ggplot2
   - r-patchwork
   - r-smartcor
+  - r-readr
