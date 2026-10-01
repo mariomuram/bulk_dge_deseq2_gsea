@@ -81,17 +81,24 @@ if unknown_condition_fields:
     f"`sample_label_pattern`: {sorted(unknown_condition_fields)}."
   )
 
-configured_confounder_fields = DESIGN.get("confounders")
-if configured_confounder_fields is None:
-  CONFOUNDER_FIELD_NAMES = sorted(set(FIELD_NAMES) - set(CONDITION_FIELD_NAMES))
-else:
-  CONFOUNDER_FIELD_NAMES = list(configured_confounder_fields)
-  unknown_confounder_fields = set(CONFOUNDER_FIELD_NAMES) - set(FIELD_NAMES)
-  if unknown_confounder_fields:
-    raise ValueError(
-      f"`design.confounders` references field(s) not produced by "
-      f"`sample_label_pattern`: {sorted(unknown_confounder_fields)}."
-    )
+CONFOUNDER_FIELD_TYPES = DESIGN.get("confounders", {})
+CONFOUNDER_FIELD_NAMES = list(CONFOUNDER_FIELD_TYPES.keys())
+_ALLOWED_CONFOUNDER_TYPES = ("binary", "categorical", "ordinal", "continuous")
+invalid_confounder_types = {
+  f: t for f, t in CONFOUNDER_FIELD_TYPES.items()
+  if t not in _ALLOWED_CONFOUNDER_TYPES
+}
+if invalid_confounder_types:
+  raise ValueError(
+    f"`design.confounders` declares unsupported type(s): "
+    f"{invalid_confounder_types}. Allowed: {list(_ALLOWED_CONFOUNDER_TYPES)}."
+  )
+unknown_confounder_fields = set(CONFOUNDER_FIELD_NAMES) - set(FIELD_NAMES)
+if unknown_confounder_fields:
+  raise ValueError(
+    f"`design.confounders` references field(s) not produced by "
+    f"`sample_label_pattern`: {sorted(unknown_confounder_fields)}."
+  )
 
 overlap = set(CONDITION_FIELD_NAMES) & set(CONFOUNDER_FIELD_NAMES)
 if overlap:
@@ -114,16 +121,9 @@ if PCA_LABEL_FIELD is not None:
 
 if unclassified_fields:
   warnings.warn(
-    f"Field(s) {sorted(unclassified_fields)} are produced by "
-    "`sample_label_pattern` but are neither part of "
-    "`sample_condition_pattern` nor listed in `design.confounders` or set as "
-    "`pca.label`. Dropping..."
+    f"Fields {sorted(unclassified_fields)} are retained in colData() for "
+    "diagnostics only and are excluded from the design matrix."
   )
-  FIELD_NAMES = list(set(FIELD_NAMES) - set(unclassified_fields))
-  for sample in SAMPLE_FIELDS:
-    for unclassified_field in (set(SAMPLE_FIELDS[sample].keys())
-                               & unclassified_fields):
-      del SAMPLE_FIELDS[sample][unclassified_field]
 
 # SAMPLES_INFO currently holds the raw sample_label_pattern string
 # (needed just above to parse SAMPLE_FIELDS). Replace it with the
@@ -137,6 +137,104 @@ for sample in SAMPLES_INFO:
   SAMPLES_INFO[sample] = CONDITION_PATTERN.format(
     **{f: fields[f] for f in CONDITION_FIELD_NAMES}
   )
+
+# --- Auto-detect field types ---------------------------------------
+def infer_field_type(values):
+  """
+  Infer field type from unique values.
+
+  Inspired by the `smartcor` R package's intelligent variable classification,
+  but extended with early detection of uninformative fields (constant and
+  identifier types, absent from smartcor).
+
+  Constant fields (single value across all samples) provide no information.
+  Identifiers (sample names, run IDs, etc.) with 100% unique values create
+  spurious correlations and η² = 1 in ANOVA. Detecting both at the Snakefile
+  level allows downstream diagnostics (PC-field association matrix, field
+  collinearity matrix) to skip them cleanly.
+
+  Rules applied in order:
+  1. Constant (1 unique value) -> "constant"
+  2. Identifier (100% unique) -> "identifier"
+  3. Binary (exactly 2 unique) -> "binary"
+  4. Character/string vector -> "categorical"
+  5. Logical -> "binary"
+  6. Numeric with <= 10 unique whole numbers -> "ordinal"
+  7. Other numeric -> "continuous"
+  """
+
+  if not values:
+    return "categorical"  # default for empty
+
+  unique_vals = set(values)
+
+  # Rule 0: Constant (only 1 unique value)
+  if len(unique_vals) == 1:
+    return "constant"
+
+  # Rule 1: Identifier (100% unique across all samples)
+  if len(unique_vals) == len(values):
+    return "identifier"
+
+  # Rule 2: Binary (exactly 2 unique values)
+  if len(unique_vals) == 2:
+    return "binary"
+
+  # Rule 3: Character/string (see below)
+
+  # Rule 4: Logical/boolean
+  if all(isinstance(v, bool) for v in unique_vals):
+    return "binary"
+
+  # Try numeric coercion for rules 5 and 6. This must run before falling
+  # back to "categorical": every value here is a Python str (parsed from a
+  # sample label), so a numeric-looking field (e.g. age) is also a str --
+  # attempting numeric coercion first is what actually distinguishes it
+  # from a genuinely non-numeric label.
+  try:
+    numeric_vals = [float(v) for v in unique_vals]
+    # Rule 5: Numeric with <= 10 unique whole numbers
+    if len(unique_vals) <= 10 and all(v == int(v) for v in numeric_vals):
+      return "ordinal"
+    # Rule 6: Other numeric
+    return "continuous"
+  except (ValueError, TypeError):
+    # Rule 3 (evaluated here, after numeric coercion fails): categorical
+    return "categorical"
+
+# For retained fields not in CONFOUNDER_FIELD_TYPES, auto-detect type
+FIELD_TYPES = {}
+
+# Start with explicit confounder types
+if "confounders" in DESIGN:
+  FIELD_TYPES.update(DESIGN["confounders"])
+
+# Invert: collect all values per field across all samples
+_FIELD_VALUES = {}
+for sample_id, field_dict in SAMPLE_FIELDS.items():
+  for field_name, field_value in field_dict.items():
+    if field_name not in _FIELD_VALUES:
+      _FIELD_VALUES[field_name] = []
+    _FIELD_VALUES[field_name].append(field_value)
+
+# Auto-detect remaining fields
+for field_name, field_values in _FIELD_VALUES.items():
+  if field_name not in FIELD_TYPES:
+    detected_type = infer_field_type(field_values)
+    FIELD_TYPES[field_name] = detected_type
+    print(f"[Type Detection] Field '{field_name}': auto-detected as "
+          f"'{detected_type}'")
+
+# Cleanup
+del _FIELD_VALUES
+
+# --- Batch-correction stages and diagnostics ------------------------
+
+CORRECTION_METHODS = ["uncorrected", "limma"]  # TODO: extend with "combat_seq"
+# Without confounders there is nothing to correct for: only the uncorrected
+# stage is ever requested (batch_correct.R additionally refuses to run).
+ACTIVE_CORRECTION_METHODS = [c for c in CORRECTION_METHODS
+                             if c == "uncorrected" or CONFOUNDER_FIELD_NAMES]
 
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
@@ -270,6 +368,7 @@ HEATMAP_TOP_N = config["gsea_summary"]["heatmap_top_n"]
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
   reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
+  correction = "|".join(CORRECTION_METHODS),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
@@ -290,7 +389,15 @@ rule all:
     expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
            contrast=CONTRAST_NAMES),
     # QC plots
-    f"{OUTPUT_DIR}/qc/pca.pdf",
+    expand(f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
+           correction=ACTIVE_CORRECTION_METHODS),
+    expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}_heatmap.pdf",
+           correction=ACTIVE_CORRECTION_METHODS),
+    f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
+    # QC tables
+    expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}.tsv.gz",
+           correction=ACTIVE_CORRECTION_METHODS),
+    f"{OUTPUT_DIR}/qc/field_collinearity.tsv.gz",
     # DGE plots
     expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_{{plot}}_plot_{{lfc}}.pdf",
            contrast=CONTRAST_NAMES, plot = { "ma", "volcano" },
@@ -308,7 +415,7 @@ rule all:
     *_AGGREGATE_GSEA_OUTPUTS,
 
 rule deseq2_fit:
-  input: count_files = COUNT_FILE_PATHS,
+  input: count_files = COUNT_FILE_PATHS
   params:
     samples_info = SAMPLES_INFO,
     sample_fields = SAMPLE_FIELDS,
@@ -316,6 +423,7 @@ rule deseq2_fit:
     file_to_samples = FILE_TO_SAMPLES,
     condition_fields = CONDITION_FIELD_NAMES,
     confounder_fields = CONFOUNDER_FIELD_NAMES,
+    confounder_field_types = CONFOUNDER_FIELD_TYPES,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
   log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
   conda: "envs/deseq2_fit.yaml"
@@ -352,27 +460,92 @@ rule deseq2_contrast:
   conda: "envs/deseq2_contrast.yaml"
   script: "scripts/deseq2_contrast.R"
 
-rule qc_pca:
+rule vst_blind:
+  input: dds_rds = rules.deseq2_fit.output.dds_rds,
+  output: vst = f"{OUTPUT_DIR}/deseq2/vst_blind.rds",
+  log: f"{OUTPUT_DIR}/logs/vst_blind.log"
+  conda: "envs/vst_blind.yaml"
+  script: "scripts/vst_blind.R"
+
+rule batch_correct:
+  wildcard_constraints:
+    correction = "|".join(c for c in CORRECTION_METHODS if c != "uncorrected")
   input:
     dds_rds = rules.deseq2_fit.output.dds_rds,
+    vst = rules.vst_blind.output.vst,
+  output: vst = f"{OUTPUT_DIR}/deseq2/vst_corrected_{{correction}}.rds",
+  log: f"{OUTPUT_DIR}/logs/batch_correct_{{correction}}.log"
+  conda: "envs/batch_correct.yaml"
+  script: "scripts/batch_correct.R"
+
+def _assay_for_pca(wildcards):
+  if wildcards.correction == "uncorrected":
+    return rules.vst_blind.output.vst
+  return f"{OUTPUT_DIR}/deseq2/vst_corrected_{wildcards.correction}.rds"
+
+rule plot_pca:
+  input:
+    dds_rds = rules.deseq2_fit.output.dds_rds,
+    assay = _assay_for_pca,
     plot_theme_lib = workflow.source_path("scripts/lib/plot_theme.R"),
     # ^-- explicitly re-run upon code change
-  output: pca = f"{OUTPUT_DIR}/qc/pca.pdf",
+  output:
+    pca = f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
+    scores = f"{OUTPUT_DIR}/qc/pca_{{correction}}_scores.rds",
   params:
     color = config["pca"]["color"],
     shape = config["pca"]["shape"],
     label = PCA_LABEL_FIELD,
     palette = config["pca"].get("palette", "Dark2"),
-  log: f"{OUTPUT_DIR}/logs/qc_pca.log"
-  conda: "envs/qc_pca.yaml"
-  script: "scripts/qc_pca.R"
+    title_suffix = lambda wc: (
+      "" if wc.correction == "uncorrected" else f" ({wc.correction}-corrected)"
+    ),
+  log: f"{OUTPUT_DIR}/logs/plot_pca_{{correction}}.log"
+  conda: "envs/plot_pca.yaml"
+  script: "scripts/plot_pca.R"
+
+rule pc_field_association:
+  input:
+    dds_rds = rules.deseq2_fit.output.dds_rds,
+    pca_scores = rules.plot_pca.output.scores,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
+    association_lib = workflow.source_path("scripts/lib/association.R"),
+    # ^-- explicitly re-run upon code change
+  output:
+    heatmap =
+      f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}_heatmap.pdf",
+    table = f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}.tsv.gz",
+  params:
+    condition_fields = CONDITION_FIELD_NAMES,
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
+    field_types = FIELD_TYPES,
+  log: f"{OUTPUT_DIR}/logs/pc_field_association_{{correction}}.log"
+  conda: "envs/pc_field_association.yaml"
+  script: "scripts/pc_field_association.R"
+
+rule field_collinearity:
+  input:
+    dds_rds = rules.deseq2_fit.output.dds_rds,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
+    association_lib = rules.pc_field_association.input.association_lib,
+    # ^-- explicitly re-run upon code change
+  output:
+    heatmap = f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
+    table = f"{OUTPUT_DIR}/qc/field_collinearity.tsv.gz",
+  params:
+    condition_fields = CONDITION_FIELD_NAMES,
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
+    field_types = FIELD_TYPES,
+  log: f"{OUTPUT_DIR}/logs/field_collinearity.log"
+  conda: "envs/field_collinearity.yaml"
+  script: "scripts/field_collinearity.R"
 
 rule plot_volcano:
   input:
     results = rules.deseq2_contrast.output.results,
     plot_input_lib = workflow.source_path("scripts/lib/plot_input.R"),
     # ^-- explicitly re-run upon code change
-    plot_theme_lib = rules.qc_pca.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
   params:
     contrast_name = "{contrast}",
@@ -434,7 +607,7 @@ rule gsea_run_go:
 
 rule gsea_run_hallmark:
   wildcard_constraints: gsea = "|".join(OTHER_GSEA_NAMES)
-  input: 
+  input:
     results = rules.gsea_run_go.input.results,
     ranking_lib = rules.gsea_run_go.input.ranking_lib,
     # ^-- explicitly re-run upon code change
@@ -462,7 +635,7 @@ rule gsea_postprocess_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
   input:
     gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds,
-    plot_theme_lib = rules.qc_pca.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
   output:
     gsea_table_all = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",

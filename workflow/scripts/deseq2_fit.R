@@ -214,8 +214,10 @@ cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
 condition_field_names <- unlist(snakemake@params[["condition_fields"]])
 confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+confounder_field_types <- snakemake@params[["confounder_field_types"]]
 cat("Condition fields (crossed):", paste(condition_field_names,
                                          collapse = ", "), "\n")
+confounder_mat <- NULL
 if (length(confounder_field_names) > 0) {
   cat("Confounder fields (additive only):",
       paste(confounder_field_names, collapse = ", "), "\n")
@@ -331,7 +333,28 @@ if (length(confounder_field_names) > 0) {
   )
   cat("\nConfounder formula (additive, before rank check):",
       deparse(confounder_formula), "\n")
-  confounder_mat <- model.matrix(confounder_formula, data = coldata)
+  # Every coldata column is a string parsed from the sample label (and each
+  # field was turned into a factor by relevel() above), while model.matrix()
+  # decides factor-vs-numeric from the R type. A confounder declared
+  # "continuous" must therefore be cast explicitly, or it gets one dummy
+  # column per distinct value. as.character() first: as.numeric() on a
+  # factor returns the level codes, not the values.
+  confounder_coldata <- coldata
+  for (f in confounder_field_names) {
+    if (identical(confounder_field_types[[f]], "continuous")) {
+      values <- as.character(coldata[[f]])
+      numeric_values <- suppressWarnings(as.numeric(values))
+      if (anyNA(numeric_values)) {
+        stop(
+          "ERROR: confounder '", f, "' is declared continuous but has ",
+          "non-numeric value(s): ",
+          paste(unique(values[is.na(numeric_values)]), collapse = ", ")
+        )
+      }
+      confounder_coldata[[f]] <- numeric_values
+    }
+  }
+  confounder_mat <- model.matrix(confounder_formula, data = confounder_coldata)
   confounder_mat <- confounder_mat[
     , colnames(confounder_mat) != "(Intercept)", drop = FALSE
   ]
@@ -449,9 +472,14 @@ colnames(full_mat) <- resultsNames(dds)
 cat("\nStashed model matrix columns (synced to resultsNames):\n")
 print(colnames(full_mat))
 
-# --- Stash the exact fitted matrix for deseq2_contrast.R ------------
+# --- Stash fitted matrix and field names for downstream use ------
 
 metadata(dds)$full_model_matrix <- full_mat
+metadata(dds)$condition_model_matrix <- condition_mat
+# NULL (no key) when there are no confounders
+metadata(dds)$confounder_model_matrix <- confounder_mat
+metadata(dds)$condition_field_names <- condition_field_names
+metadata(dds)$confounder_field_names <- confounder_field_names
 
 # --- Save --------------------------------------------------------
 

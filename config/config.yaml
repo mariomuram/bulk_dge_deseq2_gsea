@@ -77,21 +77,21 @@ design:
 # a group-averaged model-matrix contrast against the primary
 # full-crossing dds).
 contrasts:
-  CBi08_nodox_vs_clean:
-    numerator: "parental_nodox"
-    denominator: "parental_clean"
+#  CBi08_nodox_vs_clean:
+#    numerator: "parental_nodox"
+#    denominator: "parental_clean"
   GATA2_dox_vs_nodox:
     numerator: "GATA2R396Q_dox"
     denominator: "GATA2R396Q_nodox"
   CBi08_dox_vs_nodox:
     numerator: "parental_dox"
     denominator: "parental_nodox"
-  GATA2_dox_vs_CBi08_nodox:
-    numerator: "GATA2R396Q_dox"
-    denominator: "parental_nodox"
-  GATA2_nodox_vs_CBi08_nodox:
-    numerator: "GATA2R396Q_nodox"
-    denominator: "parental_nodox"
+#  GATA2_dox_vs_CBi08_nodox:
+#    numerator: "GATA2R396Q_dox"
+#    denominator: "parental_nodox"
+#  GATA2_nodox_vs_CBi08_nodox:
+#    numerator: "GATA2R396Q_nodox"
+#    denominator: "parental_nodox"
   GATA2_specific_response:
     groups:
       GATA2R396Q_dox: 1
@@ -148,12 +148,13 @@ gsea:
       - 'HALLMARK_MYC_TARGETS_V1'
       - 'HALLMARK_G2M_CHECKPOINT'
       - 'HALLMARK_FATTY_ACID_METABOLISM'
-      - 'HALLMARK_APICAL_JUNCTION'
       - 'HALLMARK_PI3K_AKT_MTOR_SIGNALING'
       - 'HALLMARK_KRAS_SIGNALING_UP'
       - 'HALLMARK_E2F_TARGETS'
+      - 'HALLMARK_HYPOXIA'
       - 'HALLMARK_TGF_BETA_SIGNALING'
-      - 'HALLMARK_UV_RESPONSE_DNA'
+      - 'HALLMARK_WNT_BETA_CATENIN_SIGNALING'
+      - 'HALLMARK_PEROXISOME'
 
 colors:
   direction:
