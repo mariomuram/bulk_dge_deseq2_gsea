@@ -27,6 +27,7 @@ cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["association_lib"]])
+source(snakemake@input[["heatmap_theme_lib"]])
 
 correction <- snakemake@wildcards[["correction"]]
 condition_field_names <- unlist(snakemake@params[["condition_fields"]])
@@ -71,9 +72,8 @@ plot_pc_field_association <- function(assoc, var_explained, roles) {
   assoc$field <- factor(assoc$field, levels = field_levels)
   assoc$pc <- factor(assoc$pc, levels = pc_names)
   assoc$neglogp <- pmin(-log10(assoc$p_value), 4)
-  assoc$star <- ifelse(!is.na(assoc$p_value) & assoc$p_value < 0.05, "*", "")
+  assoc$star <- significance_asterisks(assoc$p_value)
 
-  no_grid <- theme(panel.grid = element_blank(), axis.line = element_blank())
   main <- ggplot(assoc, aes(x = pc, y = field, fill = neglogp)) +
     geom_tile(colour = "white") +
     geom_text(aes(label = star), size = default_text_size) +
@@ -81,7 +81,7 @@ plot_pc_field_association <- function(assoc, var_explained, roles) {
                         na.value = "grey85",
                         name = expression(-log[10](p)~"(cap 4)")) +
     labs(x = NULL, y = NULL) +
-    no_grid + theme(axis.text = element_blank())
+    theme_heatmap_no_grid() + theme(axis.text = element_blank())
 
   role_data <- data.frame(
     field = factor(names(roles), levels = field_levels),
@@ -95,7 +95,7 @@ plot_pc_field_association <- function(assoc, var_explained, roles) {
       drop = FALSE, name = "Field role"
     ) +
     labs(x = NULL, y = NULL) +
-    no_grid + theme(axis.text.x = element_blank())
+    theme_heatmap_no_grid() + theme(axis.text.x = element_blank())
 
   var_data <- data.frame(
     pc = factor(pc_names, levels = pc_names),
@@ -108,7 +108,7 @@ plot_pc_field_association <- function(assoc, var_explained, roles) {
     scale_fill_gradient(low = "white", high = "steelblue",
                         name = "% variance") +
     labs(x = NULL, y = NULL) +
-    no_grid + theme(axis.text = element_blank())
+    theme_heatmap_no_grid() + theme(axis.text = element_blank())
 
   wrap_plots(R = role_strip, H = main, V = var_strip, design = "RH\n#V") +
     plot_layout(widths = c(1, length(pc_names)),
@@ -149,7 +149,7 @@ names(roles) <- names(field_types)
 
 table_file <- snakemake@output[["table"]]
 dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
-readr::write_tsv(assoc, table_file)
+write_tsv(assoc, table_file)
 cat("Saved:", table_file, "\n")
 
 output_file <- snakemake@output[["heatmap"]]

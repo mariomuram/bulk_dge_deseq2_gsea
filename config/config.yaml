@@ -161,6 +161,7 @@ colors:
     down: '#2166ac'
     none: '#a0a0a0'
     up: '#b2182b'
+    na: 'white'
 gsea_plots:
   lollipop_plot:
     # Either `size` (# genes in set) or `count` (# driver genes);

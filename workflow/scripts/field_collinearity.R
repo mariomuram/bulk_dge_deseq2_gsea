@@ -40,6 +40,7 @@ cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["association_lib"]])
+source(snakemake@input[["heatmap_theme_lib"]])
 
 condition_field_names <- unlist(snakemake@params[["condition_fields"]])
 confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
@@ -73,7 +74,7 @@ if (n_valid == 0) {
 
 table_file <- snakemake@output[["table"]]
 dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
-readr::write_tsv(collinearity, table_file)
+write_tsv(collinearity, table_file)
 cat("Saved:", table_file, "\n")
 
 # Order: condition, confounder, other.
@@ -94,7 +95,7 @@ heat_data$b <- factor(heat_data$b, levels = rev(field_order))
 heat_data$label <- ifelse(
   is.na(heat_data$estimate), "NA",
   sprintf("%.2f%s", heat_data$estimate,
-          ifelse(!is.na(heat_data$p) & heat_data$p < 0.05, "*", ""))
+          significance_asterisks(heat_data$p))
 )
 
 heatmap <- ggplot(heat_data, aes(x = a, y = b, fill = estimate)) +
@@ -105,8 +106,8 @@ heatmap <- ggplot(heat_data, aes(x = a, y = b, fill = estimate)) +
   labs(x = NULL, y = NULL,
        caption = paste("Signed correlations shown as |r|; Cramer's V is",
                        "unsigned. * = raw p < 0.05.")) +
-  theme(panel.grid = element_blank(), axis.line = element_blank(),
-        axis.text.x = element_text(angle = 45, hjust = 1))
+  theme_heatmap_no_grid() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 output_file <- snakemake@output[["heatmap"]]
 # Sized for the 20 pt projector theme (~1 in per field).

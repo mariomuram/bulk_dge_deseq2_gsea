@@ -27,13 +27,14 @@ theme_projector <- function(base_size = 20, base_family = "sans") {
 }
 
 # Export function
-save_plot <- function(filename, plot, width = 8, height = 6) {
+save_plot <- function(filename, plot, width = 8, height = 6, ...) {
   ggsave(
     filename = filename,
     plot = plot,
     width = width,
     height = height,
     units = "in",
+    ...,
     device = function(filename, ...) {
       pdf(file = filename, useDingbats = FALSE, ...)
     }

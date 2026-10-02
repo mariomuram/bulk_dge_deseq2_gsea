@@ -509,6 +509,7 @@ rule pc_field_association:
     pca_scores = rules.plot_pca.output.scores,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = workflow.source_path("scripts/lib/association.R"),
+    heatmap_theme_lib = workflow.source_path("scripts/lib/heatmap_theme.R"),
     # ^-- explicitly re-run upon code change
   output:
     heatmap =
@@ -527,6 +528,7 @@ rule field_collinearity:
     dds_rds = rules.deseq2_fit.output.dds_rds,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = rules.pc_field_association.input.association_lib,
+    heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
     # ^-- explicitly re-run upon code change
   output:
     heatmap = f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
@@ -675,21 +677,30 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
 
 rule aggregate_gsea:
   input:
-    lambda wc: expand(
+    gsea_tables = lambda wc: expand(
       rules.gsea_postprocess_go.output.gsea_table_all,
       contrast=CONTRAST_NAMES, gsea=wc.gsea
-    )
+    ),
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
+    heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
+    # ^-- explicitly re-run upon code change
   output:
     summary_table = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz",
     heatmap = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
     jaccard = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
   params:
-    contrast_names = CONTRAST_NAMES,
+    grouping_var = "contrast",
+    group_names = CONTRAST_NAMES,
+    rank_heuristic = "breadth",
     gsea_name = rules.gsea_postprocess_go.params.gsea_name,
     padj_threshold = rules.gsea_postprocess_go.params.padj_threshold,
     gene_sets_of_interest =
       rules.gsea_postprocess_go.params.gene_sets_of_interest,
-    heatmap_top_n = HEATMAP_TOP_N
+    heatmap_top_n = HEATMAP_TOP_N,
+    color_up = rules.plot_volcano.params.color_up,
+    color_down = rules.plot_volcano.params.color_down,
+    color_none = rules.plot_volcano.params.color_none,
+    color_na = config["colors"]["direction"].get("na", "grey90"),
   log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}_aggregate.log"
   conda: "envs/gsea_summary.yaml"
   script: "scripts/gsea_summary.R"

@@ -1,195 +1,142 @@
 #!/usr/bin/env Rscript
-# Cross-contrast GSEA summary, run once per database/analysis
-# (i.e. once per `gsea` wildcard -- gobp, hallmark, etc). Reads
-# every contrast's gsea_table_all (ALL tested gene sets, not just
-# this contrast's own significant ones -- see gsea_postprocess.R).
-# Unions the pathways significant in ANY contrast, then reports
-# each unioned pathway's real NES/padj from every contrast it was
-# tested in -- including contrasts where that pathway didn't
-# independently clear padj_threshold. Filtering per-contrast before
-# unioning would make a pathway with near-identical NES look
-# contrast-specific whenever it happened to sit just either side of
-# the threshold in different contrasts; this avoids that. Builds:
-#   - a pathway x contrast matrix of NES (padj alongside)
+# Cross-group GSEA summary, run once per database/analysis (i.e. once per
+# `gsea` wildcard -- gobp, hallmark, etc). "Group" is whatever
+# `grouping_var` names: "contrast" today, potentially "strategy" later
+# (reuse via `use rule aggregate_gsea as ... with: params:`).
+#
+# Reads every group's gsea_table_all (ALL tested gene sets, not just that
+# group's own significant ones -- see gsea_postprocess.R). Unions the
+# pathways significant in ANY group, then reports each unioned pathway's
+# real NES/padj from every group it was tested in -- including groups where
+# it didn't independently clear padj_threshold. Filtering per group before
+# unioning would make a pathway with near-identical NES look group-specific
+# whenever it sat just either side of the threshold in different groups.
+# NA in the output means "not tested", never "not significant".
+# Builds:
+#   - a pathway x group matrix of NES (padj alongside)
 #   - a heatmap of that matrix (capped for legibility)
-#   - a pairwise Jaccard-overlap table of each contrast pair's
-#     significant-pathway sets
+#   - a pairwise Jaccard-overlap table of each group pair's
+#     significant-pathway sets (unrestricted by the heatmap cap)
 library(readr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 
-logfile <- snakemake@log[[1]]
-dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
-logfile <- file(logfile, open = "w")
-sink(logfile, type = "output")
-sink(logfile, type = "message", append = TRUE)
+# =====================================================================
+# Functions
+# =====================================================================
 
-cat("=== GSEA cross-contrast summary ===\n")
-cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
-
-gsea_name <- snakemake@params[["gsea_name"]]
-contrast_names <- snakemake@params[["contrast_names"]]
-padj_threshold <- snakemake@params[["padj_threshold"]]
-gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
-heatmap_top_n <- snakemake@params[["heatmap_top_n"]]
-
-cat("Analysis name:", gsea_name, "\n")
-cat("Contrasts:", paste(contrast_names, collapse = ", "), "\n")
-cat(
-  "padj threshold (applied here, per contrast, to decide union",
-  "membership):", padj_threshold, "\n\n"
-)
-
-input_paths <- unlist(snakemake@input)
-if (length(input_paths) != length(contrast_names)) {
-  stop(
-    "ERROR: got ", length(input_paths), " input table(s) but ",
-    length(contrast_names), " contrast name(s) in params. These ",
-    "must line up positionally (both come from the same ",
-    "CONTRAST_NAMES-ordered expand() in the Snakefile) -- check ",
-    "the aggregate_gsea rule's input and params."
-  )
-}
-
-# --- Load every contrast's full (all tested gene sets) table ----------
-
-cat("Loading per-contrast tables...\n")
-per_contrast <- vector("list", length(contrast_names))
-for (i in seq_along(contrast_names)) {
-  contrast <- contrast_names[i]
-  path <- input_paths[i]
-  cat(" -", contrast, ":", path, "\n")
-  df <- read_tsv(path, show_col_types = FALSE)
-    if (!all(c("id", "description", "NES", "padj") %in% colnames(df))) {
+# Read every group's table, validate columns, row-bind with a column named
+# by the VALUE of grouping_var holding each table's group label.
+load_group_tables <- function(input_paths, group_names, grouping_var) {
+  required <- c("id", "description", "NES", "padj")
+  if (grouping_var %in% required) {
+    stop("ERROR: grouping_var '", grouping_var, "' collides with a ",
+         "required column name (", paste(required, collapse = ", "), ").")
+  }
+  if (length(input_paths) != length(group_names)) {
     stop(
-      "ERROR: ", path, " is missing one of the expected columns ",
-      "'id', 'description', 'NES', 'padj'. Got: ",
-      paste(colnames(df), collapse = ", ")
+      "ERROR: got ", length(input_paths), " input table(s) but ",
+      length(group_names), " group name(s) in params. These must line ",
+      "up positionally (both come from the same ordered expand() in the ",
+      "Snakefile) -- check the aggregate_gsea rule's input and params. ",
+      "Input paths seen: ", paste(input_paths, collapse = ", ")
     )
   }
-  df$contrast <- contrast
-  per_contrast[[i]] <- df %>% select(id, description, contrast, NES, padj)
-}
-
-long_df <- bind_rows(per_contrast)
-cat(
-  "\nTotal (pathway, contrast) rows loaded across all tested gene",
-  "sets:", nrow(long_df), "\n"
-)
-
-# --- Per-contrast significant sets, and their union --------------------
-
-sig_by_contrast <- long_df %>% filter(padj < padj_threshold)
-sig_sets <- split(sig_by_contrast$id, sig_by_contrast$contrast)
-for (contrast in contrast_names) {
-  if (is.null(sig_sets[[contrast]])) {
-    sig_sets[[contrast]] <- character()
+  per_group <- vector("list", length(group_names))
+  for (i in seq_along(group_names)) {
+    path <- input_paths[i]
+    cat(" -", group_names[i], ":", path, "\n")
+    df <- read_tsv(path, show_col_types = FALSE)
+    if (!all(required %in% colnames(df))) {
+      stop(
+        "ERROR: ", path, " is missing one of the expected columns ",
+        "'id', 'description', 'NES', 'padj'. Got: ",
+        paste(colnames(df), collapse = ", ")
+      )
+    }
+    df[[grouping_var]] <- group_names[i]
+    per_group[[i]] <- df %>%
+      select(all_of(c("id", "description", grouping_var, "NES", "padj")))
   }
-  sig_sets[[contrast]] <- unique(sig_sets[[contrast]])
+  bind_rows(per_group)
 }
 
-union_sig_ids <- unique(unlist(sig_sets, use.names = FALSE))
-cat(
-  "\nUnion of pathways significant in at least one contrast:",
-  length(union_sig_ids), "\n"
-)
+# Per-group significant sets, their union, and the union-restricted table.
+# display_df deliberately keeps every group's real NES/padj for each
+# unioned pathway (not filtered by that group's own significance).
+compute_group_union <- function(long_df, grouping_var, group_names,
+                                padj_threshold) {
+  sig_by_group <- long_df %>% filter(padj < padj_threshold)
+  sig_sets <- split(sig_by_group$id, sig_by_group[[grouping_var]])
+  for (g in group_names) {
+    if (is.null(sig_sets[[g]])) {
+      sig_sets[[g]] <- character()
+    }
+    sig_sets[[g]] <- unique(sig_sets[[g]])
+  }
+  sig_sets <- sig_sets[group_names]
 
-if (length(union_sig_ids) == 0) {
-  cat(
-    "WARNING: no contrast had any significant pathway for '",
-    gsea_name, "' (padj < ", padj_threshold, "). Writing empty ",
-    "summary table, jaccard table, and placeholder heatmap.\n",
-    sep = ""
+  union_sig_ids <- unique(unlist(sig_sets, use.names = FALSE))
+  display_df <- long_df %>% filter(id %in% union_sig_ids)
+
+  # One description per ID (first encountered), defensively.
+  id_description <- display_df %>%
+    distinct(id, description) %>%
+    group_by(id) %>%
+    summarise(description = first(description), .groups = "drop")
+  n_multi_desc <- sum(duplicated(
+    (display_df %>% distinct(id, description))$id
+  ))
+
+  list(
+    sig_sets = sig_sets, union_sig_ids = union_sig_ids,
+    display_df = display_df, id_description = id_description,
+    n_multi_desc = n_multi_desc
   )
 }
 
-# --- Restrict to that union, but keep every contrast's real NES/padj ---
-
-# Deliberately NOT filtering each row by that contrast's own
-# significance: a pathway significant in contrast A still shows
-# its actual (possibly just-short-of-threshold) NES/padj from
-# contrast B here, rather than NA.
-display_df <- long_df %>% filter(id %in% union_sig_ids)
-
-# One description per ID, for display (heatmap axis, summary
-# table). An ID should map to a single description reliably
-# within a run; this defensively takes the first encountered
-# per ID rather than assuming it, per pipeline convention.
-id_description <- display_df %>%
-  distinct(id, description) %>%
-  group_by(id) %>%
-  summarise(description = first(description), .groups = "drop")
-n_multi_desc <- sum(duplicated(
-  (display_df %>% distinct(id, description))$id
-))
-if (n_multi_desc > 0) {
-  cat(
-    "WARNING:", n_multi_desc, "gene set ID(s) mapped to more",
-    "than one description across contrasts; keeping the first",
-    "description encountered per ID.\n"
-  )
-}
-
-# --- Wide summary table: pathway rows, per-contrast NES/padj cols -----
-
-cat("\nBuilding wide summary table...\n")
-if (nrow(display_df) > 0) {
-  nes_wide <- display_df %>%
-    select(id, contrast, NES) %>%
-    pivot_wider(
-      names_from = contrast, values_from = NES,
-      names_prefix = "NES_"
-    )
-  padj_wide <- display_df %>%
-    select(id, contrast, padj) %>%
-    pivot_wider(
-      names_from = contrast, values_from = padj,
-      names_prefix = "padj_"
-    )
-  summary_df <- id_description %>%
-    left_join(nes_wide, by = "id") %>%
-    left_join(padj_wide, by = "id") %>%
-    arrange(id)
-  cat(
-    "NOTE: a pathway with NA for a given contrast means it was",
-    "not tested there at all (e.g. too few of its member genes",
-    "survived that contrast's own ranking-stat filtering to",
-    "clear min_set_size) -- NOT that it fell short of",
-    "significance. Every contrast's real NES/padj is shown for",
-    "any pathway significant in at least one contrast, even",
-    "where that particular contrast didn't independently clear",
-    "padj <", padj_threshold, ".\n"
-  )
-} else {
-  summary_df <- data.frame(id = character(), description = character())
-  for (contrast in contrast_names) {
-    summary_df[[paste0("NES_", contrast)]] <- numeric()
-    summary_df[[paste0("padj_", contrast)]] <- numeric()
+# Wide table: pathway rows, NES_{group}/padj_{group} columns.
+build_summary_table <- function(display_df, id_description, group_names,
+                                grouping_var) {
+  if (nrow(display_df) > 0) {
+    nes_wide <- display_df %>%
+      select(id, all_of(grouping_var), NES) %>%
+      pivot_wider(
+        names_from = all_of(grouping_var), values_from = NES,
+        names_prefix = "NES_"
+      )
+    padj_wide <- display_df %>%
+      select(id, all_of(grouping_var), padj) %>%
+      pivot_wider(
+        names_from = all_of(grouping_var), values_from = padj,
+        names_prefix = "padj_"
+      )
+    id_description %>%
+      left_join(nes_wide, by = "id") %>%
+      left_join(padj_wide, by = "id") %>%
+      arrange(id)
+  } else {
+    summary_df <- data.frame(id = character(), description = character())
+    for (g in group_names) {
+      summary_df[[paste0("NES_", g)]] <- numeric()
+      summary_df[[paste0("padj_", g)]] <- numeric()
+    }
+    summary_df
   }
 }
 
-cat("\nSaving summary table...\n")
-output_table <- snakemake@output[["summary_table"]]
-dir.create(dirname(output_table), showWarnings = FALSE, recursive = TRUE)
-con <- gzfile(output_table, open = "wb", compression = 9)
-write_tsv(summary_df, con)
-close(con)
-cat("Saved:", output_table, "\n")
+# --- Ranking heuristics ----------------------------------------------
+# All rank_by_* share one signature (display_df, sig_sets, group_names) so
+# rank_pathways() can dispatch uniformly; each returns a tibble with `id`
+# plus its metric columns, already in rank order.
 
-# --- Heatmap (capped for legibility) -----------------------------
-
-cat("\nGenerating summary heatmap...\n")
-if (nrow(display_df) > 0) {
-  # Ranked by how many contrasts each pathway is SIGNIFICANT in
-  # (not merely reported in -- with display_df now carrying every
-  # unioned pathway's NES/padj across nearly every contrast, "rows
-  # present" is no longer a useful ranking signal on its own).
-  sig_membership <- bind_rows(lapply(contrast_names, function(ct) {
-    data.frame(id = sig_sets[[ct]], contrast = ct)
-  }))
-  pathway_rank <- sig_membership %>%
-    count(id, name = "n_contrasts_significant") %>%
+# Default: n groups SIGNIFICANT in (desc), then max |NES| (desc). Ranked by
+# significance count, not "rows present": display_df carries every unioned
+# pathway across nearly every group, so presence is not informative.
+rank_by_breadth <- function(display_df, sig_sets, group_names) {
+  tibble(id = unlist(sig_sets[group_names], use.names = FALSE)) %>%
+    count(id, name = "n_groups_significant") %>%
     left_join(
       display_df %>%
         group_by(id) %>%
@@ -199,104 +146,300 @@ if (nrow(display_df) > 0) {
         ),
       by = "id"
     ) %>%
-    left_join(id_description, by = "id") %>%
-    arrange(desc(n_contrasts_significant), desc(max_abs_nes))
+    arrange(desc(n_groups_significant), desc(max_abs_nes))
+}
 
+# NES range across groups (desc): which pathways' calls are most sensitive
+# to the group/strategy used. Pathways tested in <2 groups get NA (nothing
+# to diverge from) and sort last. NOTE: untested as a *choice* until a real
+# strategy comparison exists to look at -- inclusion is not validation.
+rank_by_divergence <- function(display_df, sig_sets, group_names) {
+  display_df %>%
+    group_by(id) %>%
+    summarise(
+      n_groups_tested = sum(!is.na(NES)),
+      nes_range = if (sum(!is.na(NES)) < 2) {
+        NA_real_
+      } else {
+        diff(range(NES, na.rm = TRUE))
+      },
+      .groups = "drop"
+    ) %>%
+    arrange(desc(nes_range), id)
+}
+
+rank_pathways <- function(display_df, sig_sets, id_description, group_names,
+                          rank_fn = rank_by_breadth) {
+  rank_fn(display_df, sig_sets, group_names) %>%
+    left_join(id_description, by = "id")
+}
+
+# gene_sets_of_interest override vs. top-N. Returns the ranked rows
+# (id, description, ...) to draw, in rank order.
+select_heatmap_pathways <- function(pathway_rank, union_sig_ids,
+                                    gene_sets_of_interest, heatmap_top_n,
+                                    gsea_name = "") {
   if (!is.null(gene_sets_of_interest) && length(gene_sets_of_interest) > 0) {
     missing_ids <- setdiff(gene_sets_of_interest, union_sig_ids)
     if (length(missing_ids) > 0) {
       cat(
         "WARNING:", length(missing_ids), "configured gene set ID(s)",
-        "not significant in any contrast; omitting:",
+        "not significant in any group; omitting:",
         paste(missing_ids, collapse = ", "), "\n"
       )
     }
-    gene_sets_of_interest <- intersect(gene_sets_of_interest, union_sig_ids)
-    if (length(gene_sets_of_interest) == 0) {
+    chosen <- intersect(gene_sets_of_interest, union_sig_ids)
+    if (length(chosen) == 0) {
       stop(
         "ERROR: none of the configured `gene_sets_of_interest` for '",
         gsea_name, "' were found among the ", length(union_sig_ids),
-        " gene set(s) significant across contrasts. ",
+        " gene set(s) significant across groups. ",
         "Check the ID(s) in `config[\"gsea\"][\"", gsea_name, "\"]",
         "[\"gene_sets_of_interest\"]` against the id column of ",
-        "`gsea_table_signif` for all contrasts."
+        "`gsea_table_signif` for all groups."
       )
     }
-    cat(
-      "Using", length(gene_sets_of_interest), "configured gene set(s)",
-      "of interest.\n"
-    )
+    cat("Using", length(chosen), "configured gene set(s) of interest.\n")
   } else {
     cat(
       "No gene sets of interest configured; falling back to the top",
-      heatmap_top_n, "by padj...\n"
+      heatmap_top_n, "by the selected ranking heuristic...\n"
     )
-    gene_sets_of_interest <- pathway_rank %>%
-      slice_head(n = heatmap_top_n) %>%
-      pull(id)
-
-    n_total_pathways <- nrow(pathway_rank)
-    if (n_total_pathways > heatmap_top_n) {
+    chosen <- pathway_rank %>% slice_head(n = heatmap_top_n) %>% pull(id)
+    if (nrow(pathway_rank) > heatmap_top_n) {
       cat(
-        "NOTE:", n_total_pathways, "significant pathway(s) found;",
-        "heatmap limited to the top", heatmap_top_n, "(ranked by",
-        "number of contrasts significant in, then by max |NES|).",
+        "NOTE:", nrow(pathway_rank), "significant pathway(s) found;",
+        "heatmap limited to the top", heatmap_top_n,
+        "(rank order per the heuristic logged above).",
         "The full set is in the summary table.\n"
       )
     }
   }
+  pathway_rank %>% filter(id %in% chosen)
+}
 
+# Layout for the GSEA heatmap. Row pitch shrinks with row count (0.28 in up
+# to 30 rows, floored at 0.2 in); y-label size follows the pitch (capped at
+# the theme's base size); width grows with the longest pathway label.
+# Best-guess constants -- tweak after eyeballing real output.
+gsea_heatmap_layout <- function(selected_pathways, group_names) {
+  n_rows <- nrow(selected_pathways)
+  row_in <- max(0.2, min(0.28, 8.4 / n_rows))
+  y_text_pt <- min(base_size, 0.7 * row_in * 72)  # base_size: plot_theme.R
+  max_chars <- max(0, nchar(as.character(selected_pathways$description)),
+                   na.rm = TRUE)
+  list(
+    y_text_pt = y_text_pt,
+    height = max(5, row_in * n_rows + 3),
+    width = max(8, 3 + 1.2 * length(group_names) +
+                  max_chars * y_text_pt * 0.55 / 72)
+  )
+}
 
-  gene_sets_of_interest <- pathway_rank %>%
-    filter(id %in% gene_sets_of_interest)
-
+plot_gsea_heatmap <- function(display_df, id_description, selected_pathways,
+                              group_names, grouping_var, padj_threshold,
+                              color_up, color_down, color_none, color_na,
+                              gsea_name, layout) {
   heatmap_df <- display_df %>%
-    filter(id %in% gene_sets_of_interest$id) %>%
+    filter(id %in% selected_pathways$id) %>%
     select(-description) %>%
     left_join(id_description, by = "id") %>%
     mutate(
       description = factor(description,
-                           levels = rev(gene_sets_of_interest$description)),
-      contrast = factor(contrast, levels = contrast_names),
-      significant = factor(
-        padj < padj_threshold,
-        levels = c(TRUE, FALSE)
-      )
+                           levels = rev(selected_pathways$description))
     )
+  heatmap_df[[grouping_var]] <- factor(heatmap_df[[grouping_var]],
+                                       levels = group_names)
 
-  n_pathways_shown <- nrow(gene_sets_of_interest)
-  heatmap_plot <- ggplot(
+  ggplot(
     heatmap_df,
-    aes(x = contrast, y = description, fill = NES, alpha = significant)
+    aes(x = .data[[grouping_var]], y = description, fill = NES)
   ) +
     geom_tile(color = "white", linewidth = 0.3) +
+    geom_text(
+      aes(label = significance_asterisks(padj, padj_threshold)),
+      vjust = 0.75, size = default_text_size
+    ) +
     scale_fill_gradient2(
-      low = "#2166ac", mid = "white", high = "#b2182b",
-      midpoint = 0, na.value = "grey90"
+      low = color_down, mid = color_none, high = color_up,
+      midpoint = 0, na.value = color_na
     ) +
-    scale_alpha_manual(
-      values = c(`TRUE` = 1, `FALSE` = 0.35),
-      labels = c(
-        `TRUE` = paste0("padj < ", padj_threshold),
-        `FALSE` = paste0("padj \u2265 ", padj_threshold)
-      ),
-      name = "Significant",
-      drop = FALSE
-    ) +
-    theme_minimal() +
+    theme_heatmap_no_grid() +
     theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
-      axis.text.y = element_text(size = 7),
-      plot.title = element_text(size = 12, face = "bold")
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.text.y = element_text(size = layout$y_text_pt)
     ) +
     labs(
-      title = paste("Cross-contrast GSEA summary:", gsea_name),
-      x = "", y = "", fill = "NES"
+      title = paste0("Cross-", grouping_var, " GSEA summary: ", gsea_name),
+      x = "", y = "", fill = "NES",
+      caption = paste0("* = padj < ", padj_threshold)
     )
-  ggsave(
+}
+
+# Output columns are {grouping_var}_a / {grouping_var}_b
+# (contrast_a / contrast_b for today's grouping_var = "contrast").
+compute_pairwise_jaccard <- function(sig_sets, group_names, grouping_var) {
+  pairs <- combn(group_names, 2, simplify = FALSE)
+  rows <- lapply(pairs, function(p) {
+    a <- sig_sets[[p[1]]]
+    b <- sig_sets[[p[2]]]
+    n_shared <- length(intersect(a, b))
+    n_union <- length(union(a, b))
+    data.frame(
+      group_a = p[1], group_b = p[2],
+      jaccard = if (n_union == 0) NA_real_ else n_shared / n_union,
+      n_shared = n_shared, n_union = n_union
+    )
+  })
+  out <- bind_rows(rows) %>% arrange(desc(jaccard))
+  colnames(out)[1:2] <- paste0(grouping_var, c("_a", "_b"))
+  out
+}
+
+# =====================================================================
+# Main
+# =====================================================================
+
+logfile <- snakemake@log[[1]]
+dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
+logfile <- file(logfile, open = "w")
+sink(logfile, type = "output")
+sink(logfile, type = "message", append = TRUE)
+
+cat("=== GSEA cross-group summary ===\n")
+cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
+
+require_param <- function(name) {
+  v <- snakemake@params[[name]]
+  if (is.null(v)) {
+    stop("ERROR: required param '", name, "' missing from the rule.")
+  }
+  v
+}
+get_input <- function(name) {
+  v <- snakemake@input[[name]]
+  if (is.null(v)) {
+    stop("ERROR: required input '", name, "' missing from the rule.")
+  }
+  v
+}
+
+source(get_input("plot_theme_lib"))
+source(get_input("heatmap_theme_lib"))
+
+gsea_name <- require_param("gsea_name")
+grouping_var <- require_param("grouping_var")
+group_names <- require_param("group_names")
+padj_threshold <- require_param("padj_threshold")
+heatmap_top_n <- require_param("heatmap_top_n")
+color_up <- require_param("color_up")
+color_down <- require_param("color_down")
+color_none <- require_param("color_none")
+color_na <- require_param("color_na")
+gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
+rank_heuristic <- snakemake@params[["rank_heuristic"]]
+if (is.null(rank_heuristic)) rank_heuristic <- "breadth"
+
+rank_fns <- list(breadth = rank_by_breadth, divergence = rank_by_divergence)
+if (!rank_heuristic %in% names(rank_fns)) {
+  stop(
+    "ERROR: unknown rank_heuristic '", rank_heuristic, "'. Expected one ",
+    "of: ", paste(names(rank_fns), collapse = ", ")
+  )
+}
+
+cat("Analysis name:", gsea_name, "\n")
+cat("Grouping variable:", grouping_var, "\n")
+cat("Groups:", paste(group_names, collapse = ", "), "\n")
+cat("Ranking heuristic:", rank_heuristic, "\n")
+cat(
+  "padj threshold (applied here, per group, to decide union",
+  "membership):", padj_threshold, "\n\n"
+)
+
+# The per-group tables are the named `gsea_tables` input, ordered as
+# group_names (both come from CONTRAST_NAMES in the Snakefile). Looked up by
+# name so the lib-file inputs never enter the picture.
+input_paths <- unlist(get_input("gsea_tables"), use.names = FALSE)
+
+cat("Loading per-group tables...\n")
+long_df <- load_group_tables(input_paths, group_names, grouping_var)
+cat(
+  "\nTotal (pathway, group) rows loaded across all tested gene",
+  "sets:", nrow(long_df), "\n"
+)
+
+grp <- compute_group_union(long_df, grouping_var, group_names, padj_threshold)
+sig_sets <- grp$sig_sets
+union_sig_ids <- grp$union_sig_ids
+display_df <- grp$display_df
+id_description <- grp$id_description
+cat(
+  "\nUnion of pathways significant in at least one group:",
+  length(union_sig_ids), "\n"
+)
+if (length(union_sig_ids) == 0) {
+  cat(
+    "WARNING: no group had any significant pathway for '",
+    gsea_name, "' (padj < ", padj_threshold, "). Writing empty ",
+    "summary table, jaccard table, and placeholder heatmap.\n",
+    sep = ""
+  )
+}
+if (grp$n_multi_desc > 0) {
+  cat(
+    "WARNING:", grp$n_multi_desc, "gene set ID(s) mapped to more",
+    "than one description across groups; keeping the first",
+    "description encountered per ID.\n"
+  )
+}
+
+# --- Wide summary table -------------------------------------------------
+
+cat("\nBuilding wide summary table...\n")
+summary_df <- build_summary_table(
+  display_df, id_description, group_names, grouping_var
+)
+if (nrow(display_df) > 0) {
+  cat(
+    "NOTE: a pathway with NA for a given group means it was",
+    "not tested there at all (e.g. too few of its member genes",
+    "survived that group's own ranking-stat filtering to",
+    "clear min_set_size) -- NOT that it fell short of",
+    "significance. Every group's real NES/padj is shown for",
+    "any pathway significant in at least one group, even",
+    "where that particular group didn't independently clear",
+    "padj <", padj_threshold, ".\n"
+  )
+}
+cat("\nSaving summary table...\n")
+summary_table_file <- snakemake@output[["summary_table"]]
+dir.create(dirname(summary_table_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(summary_df, summary_table_file)
+cat("Saved:", summary_table_file, "\n")
+
+# --- Heatmap (capped for legibility) -----------------------------------
+
+cat("\nGenerating summary heatmap...\n")
+if (nrow(display_df) > 0) {
+  pathway_rank <- rank_pathways(
+    display_df, sig_sets, id_description, group_names,
+    rank_fn = rank_fns[[rank_heuristic]]
+  )
+  selected_pathways <- select_heatmap_pathways(
+    pathway_rank, union_sig_ids, gene_sets_of_interest, heatmap_top_n,
+    gsea_name
+  )
+  layout <- gsea_heatmap_layout(selected_pathways, group_names)
+  heatmap_plot <- plot_gsea_heatmap(
+    display_df, id_description, selected_pathways, group_names,
+    grouping_var, padj_threshold, color_up, color_down, color_none,
+    color_na, gsea_name, layout
+  )
+  # save_plot(filename, plot, width, height, ...): `...` -> ggsave
+  save_plot(
     snakemake@output[["heatmap"]], heatmap_plot,
-    width = 10, height = max(6, 0.18 * n_pathways_shown + 2),
-    dpi = 300, limitsize = FALSE
+    width = layout$width, height = layout$height, limitsize = FALSE
   )
   cat("Heatmap saved:", snakemake@output[["heatmap"]], "\n")
 } else {
@@ -304,7 +447,7 @@ if (nrow(display_df) > 0) {
   empty_heatmap <- ggplot() +
     annotate(
       "text", x = 0.5, y = 0.5,
-      label = "No significant pathways found in any contrast",
+      label = paste0("No significant pathways found in any ", grouping_var),
       size = 5, color = "gray50"
     ) +
     theme_void()
@@ -314,35 +457,19 @@ if (nrow(display_df) > 0) {
   )
 }
 
-# --- Pairwise Jaccard overlap of significant-pathway sets --------
+# --- Pairwise Jaccard overlap of significant-pathway sets --------------
 
 cat("\nComputing pairwise Jaccard overlap...\n")
-pairs <- combn(contrast_names, 2, simplify = FALSE)
-jaccard_rows <- lapply(pairs, function(p) {
-  a <- sig_sets[[p[1]]]
-  b <- sig_sets[[p[2]]]
-  n_shared <- length(intersect(a, b))
-  n_union <- length(union(a, b))
-  jaccard <- if (n_union == 0) NA_real_ else n_shared / n_union
-  data.frame(
-    contrast_a = p[1], contrast_b = p[2],
-    jaccard = jaccard, n_shared = n_shared, n_union = n_union
-  )
-})
-jaccard_df <- bind_rows(jaccard_rows) %>% arrange(desc(jaccard))
-
+jaccard_df <- compute_pairwise_jaccard(sig_sets, group_names, grouping_var)
 cat("Pairwise Jaccard summary (on significant-pathway sets):\n")
 print(jaccard_df)
-
 cat("\nSaving Jaccard table...\n")
-output_jaccard <- snakemake@output[["jaccard"]]
-dir.create(dirname(output_jaccard), showWarnings = FALSE, recursive = TRUE)
-con <- gzfile(output_jaccard, open = "wb", compression = 9)
-write_tsv(jaccard_df, con)
-close(con)
-cat("Saved:", output_jaccard, "\n")
+jaccard_file <- snakemake@output[["jaccard"]]
+dir.create(dirname(jaccard_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(jaccard_df, jaccard_file)
+cat("Saved:", jaccard_file, "\n")
 
-cat("\n=== GSEA cross-contrast summary complete ===\n")
+cat("\n=== GSEA cross-group summary complete ===\n")
 sink(type = "message")
 sink()
 close(logfile)
