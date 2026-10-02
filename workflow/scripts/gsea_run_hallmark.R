@@ -29,7 +29,6 @@ gene_id_style <- snakemake@params[["gene_id_style"]]
 ranking_stat <- snakemake@params[["ranking_stat"]]
 min_set_size <- snakemake@params[["min_set_size"]]
 max_set_size <- snakemake@params[["max_set_size"]]
-padj_threshold <- snakemake@params[["padj_threshold"]]
 
 cat("Contrast:", contrast_name, "\n")
 cat("Analysis name:", gsea_name, "\n")
@@ -37,8 +36,7 @@ cat("Database:", database, "\n")
 cat("Gene ID style:", gene_id_style, "\n")
 cat("Ranking stat:", ranking_stat, "\n")
 cat("Min set size:", min_set_size, "\n")
-cat("Max set size:", max_set_size, "\n")
-cat("Adjusted p-value threshold:", padj_threshold, "\n\n")
+cat("Max set size:", max_set_size, "\n\n")
 
 if (database != "HALLMARK") {
   stop(
@@ -93,11 +91,9 @@ gsea_result <- GSEA(
   geneList = ranking, TERM2GENE = term2gene, minGSSize = min_set_size,
   maxGSSize = max_set_size, pvalueCutoff = 1, by = "fgsea", seed = TRUE
 )
-n_sig <- sum(as.data.frame(gsea_result)$p.adjust < padj_threshold)
 cat(
   "\nGSEA complete:", nrow(as.data.frame(gsea_result)),
-  "gene set(s) tested,", n_sig, "significant at padj <",
-  padj_threshold, "(significance applied in postprocess,",
+  "gene set(s) tested (significance is applied in postprocess,",
   "not here)\n"
 )
 
