@@ -229,11 +229,13 @@ del _FIELD_VALUES
 
 # --- Batch-correction stages and diagnostics ------------------------
 
-CORRECTION_METHODS = ["uncorrected", "limma"]  # TODO: extend with "combat_seq"
+CORRECTION_METHODS = ["uncorrected"]  # produce real DGE output
+CORRECTION_METHODS_QC = CORRECTION_METHODS + ["limma"]  # + diagnostics-only
 # Without confounders there is nothing to correct for: only the uncorrected
 # stage is ever requested (batch_correct.R additionally refuses to run).
-ACTIVE_CORRECTION_METHODS = [c for c in CORRECTION_METHODS
-                             if c == "uncorrected" or CONFOUNDER_FIELD_NAMES]
+ACTIVE_CORRECTION_METHODS_QC = (
+  CORRECTION_METHODS_QC if CONFOUNDER_FIELD_NAMES else ["uncorrected"]
+)
 
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
@@ -367,7 +369,7 @@ HEATMAP_TOP_N = config["gsea_summary"]["heatmap_top_n"]
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
   reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
-  correction = "|".join(CORRECTION_METHODS),
+  correction = "|".join(CORRECTION_METHODS_QC),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
@@ -389,13 +391,13 @@ rule all:
            contrast=CONTRAST_NAMES),
     # QC plots
     expand(f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
-           correction=ACTIVE_CORRECTION_METHODS),
+           correction=ACTIVE_CORRECTION_METHODS_QC),
     expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}_heatmap.pdf",
-           correction=ACTIVE_CORRECTION_METHODS),
+           correction=ACTIVE_CORRECTION_METHODS_QC),
     f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
     # QC tables
     expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}.tsv.gz",
-           correction=ACTIVE_CORRECTION_METHODS),
+           correction=ACTIVE_CORRECTION_METHODS_QC),
     f"{OUTPUT_DIR}/qc/field_collinearity.tsv.gz",
     # DGE plots
     expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_{{plot}}_plot_{{lfc}}.pdf",
@@ -488,7 +490,9 @@ rule vst_blind:
 
 rule batch_correct:
   wildcard_constraints:
-    correction = "|".join(c for c in CORRECTION_METHODS if c != "uncorrected")
+    correction = "|".join(
+      c for c in CORRECTION_METHODS_QC if c not in CORRECTION_METHODS
+    )
   input:
     dds_rds = rules.deseq2_fit.output.dds_rds,
     vst = rules.vst_blind.output.vst,
