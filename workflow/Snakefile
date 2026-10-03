@@ -414,7 +414,10 @@ rule all:
     *_AGGREGATE_GSEA_OUTPUTS,
 
 rule deseq2_fit:
-  input: count_files = COUNT_FILE_PATHS
+  input:
+    count_files = COUNT_FILE_PATHS,
+    confounders_lib = workflow.source_path("scripts/lib/confounders.R"),
+    # ^-- explicitly re-run upon code change
   params:
     samples_info = SAMPLES_INFO,
     sample_fields = SAMPLE_FIELDS,
@@ -436,10 +439,14 @@ def _dds_for_contrast(wildcards):
   return rules.deseq2_fit.output.dds_rds
 
 rule deseq2_relevel:
-  input: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
+  input:
+    dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
+    confounders_lib = rules.deseq2_fit.input.confounders_lib,
+    # ^-- explicitly re-run upon code change
   params:
     reference_factor = "{reference_factor}",
     confounder_fields = CONFOUNDER_FIELD_NAMES,
+    confounder_field_types = CONFOUNDER_FIELD_TYPES,
   output:
     dds_rds =
       f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{{reference_factor}}.rds",

@@ -21,9 +21,12 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== DESeq2 Relevel + Wald Retest ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+source(snakemake@input[["confounders_lib"]])
+
 dds_file <- snakemake@input[["dds_rds"]]
 reference_factor <- snakemake@params[["reference_factor"]]
 confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+confounder_field_types <- snakemake@params[["confounder_field_types"]]
 
 cat("Loading primary DESeqDataSet:", dds_file, "\n")
 dds <- readRDS(dds_file)
@@ -40,6 +43,13 @@ if (!(reference_factor %in% available_conditions)) {
 cat("Relevelling 'condition' to reference:", reference_factor, "\n")
 colData(dds)$condition <- relevel(
   factor(colData(dds)$condition), ref = reference_factor
+)
+
+# The saved colData holds every field as a factor (see deseq2_fit.R); a
+# "continuous" confounder has to be numeric again before it enters the
+# design, exactly as in the primary fit (see lib/confounders.R).
+colData(dds) <- cast_continuous_confounders(
+  colData(dds), confounder_field_names, confounder_field_types
 )
 
 relevel_formula <- as.formula(

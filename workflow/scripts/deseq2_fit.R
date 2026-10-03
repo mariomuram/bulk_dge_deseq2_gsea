@@ -31,6 +31,8 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== DESeq2 Fit ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+source(snakemake@input[["confounders_lib"]])
+
 # --- Read and merge count matrices (from multiple files) ---------------
 
 count_files <- snakemake@input[["count_files"]]  # vector of file paths
@@ -333,27 +335,11 @@ if (length(confounder_field_names) > 0) {
   )
   cat("\nConfounder formula (additive, before rank check):",
       deparse(confounder_formula), "\n")
-  # Every coldata column is a string parsed from the sample label (and each
-  # field was turned into a factor by relevel() above), while model.matrix()
-  # decides factor-vs-numeric from the R type. A confounder declared
-  # "continuous" must therefore be cast explicitly, or it gets one dummy
-  # column per distinct value. as.character() first: as.numeric() on a
-  # factor returns the level codes, not the values.
-  confounder_coldata <- coldata
-  for (f in confounder_field_names) {
-    if (identical(confounder_field_types[[f]], "continuous")) {
-      values <- as.character(coldata[[f]])
-      numeric_values <- suppressWarnings(as.numeric(values))
-      if (anyNA(numeric_values)) {
-        stop(
-          "ERROR: confounder '", f, "' is declared continuous but has ",
-          "non-numeric value(s): ",
-          paste(unique(values[is.na(numeric_values)]), collapse = ", ")
-        )
-      }
-      confounder_coldata[[f]] <- numeric_values
-    }
-  }
+  # Every field was turned into a factor by relevel() above; "continuous"
+  # confounders must be numeric again (see lib/confounders.R).
+  confounder_coldata <- cast_continuous_confounders(
+    coldata, confounder_field_names, confounder_field_types
+  )
   confounder_mat <- model.matrix(confounder_formula, data = confounder_coldata)
   confounder_mat <- confounder_mat[
     , colnames(confounder_mat) != "(Intercept)", drop = FALSE
