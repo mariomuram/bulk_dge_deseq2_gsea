@@ -237,6 +237,29 @@ ACTIVE_CORRECTION_METHODS_QC = (
   CORRECTION_METHODS_QC if CONFOUNDER_FIELD_NAMES else ["uncorrected"]
 )
 
+# --- Confounder handling ---------------------------------------------
+# The `{confounder_handling}` wildcard labels every real-analysis output
+# (DESeq2 fit, contrasts, DGE plots, GSEA) with how confounders were dealt
+# with. One value per correction method that produces DGE output, plus
+# NO_CONFOUNDERS for runs that have no confounders to deal with at all.
+CONFOUNDER_HANDLING_FOR_CORRECTION = {"uncorrected": "confounders_modelled"}
+CONFOUNDER_HANDLING_METHODS = list(CONFOUNDER_HANDLING_FOR_CORRECTION.values())
+NO_CONFOUNDERS = "no_confounders"
+ACTIVE_CONFOUNDER_HANDLING_METHODS = (
+  CONFOUNDER_HANDLING_METHODS if CONFOUNDER_FIELD_NAMES else [NO_CONFOUNDERS]
+)
+
+# The diagnostics (QC) always look at the uncorrected counts, i.e. at the
+# dds that models the confounders (if there are any). Rules without a
+# {confounder_handling} wildcard of their own cannot use
+# `rules.deseq2_fit.output`, so they take these fully resolved paths.
+QC_CONFOUNDER_HANDLING = (
+  CONFOUNDER_HANDLING_FOR_CORRECTION["uncorrected"]
+  if CONFOUNDER_FIELD_NAMES else NO_CONFOUNDERS
+)
+QC_DDS = f"{OUTPUT_DIR}/deseq2/{QC_CONFOUNDER_HANDLING}_dds_object.rds"
+QC_VST_BLIND = f"{OUTPUT_DIR}/deseq2/{QC_CONFOUNDER_HANDLING}_vst_blind.rds"
+
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
 ALL_CONDITIONS = set(SAMPLES_INFO.values())
@@ -370,6 +393,7 @@ wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
   reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
   correction = "|".join(CORRECTION_METHODS_QC),
+  confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
 
@@ -378,17 +402,24 @@ wildcard_constraints:
 _AGGREGATE_GSEA_OUTPUTS = []
 if len(CONTRAST_NAMES) > 1:
   _AGGREGATE_GSEA_OUTPUTS = [
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz", gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
-           gsea=GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz", gsea=GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary.tsv.gz",
+           gsea=GSEA_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary_heatmap.pdf",
+           gsea=GSEA_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
+    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_jaccard.tsv.gz",
+           gsea=GSEA_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
   ]
 rule all:
   input:
     # DESeq2 results
-    f"{OUTPUT_DIR}/deseq2/dds_object.rds",
-    expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
-           contrast=CONTRAST_NAMES),
+    expand(f"{OUTPUT_DIR}/deseq2/{{confounder_handling}}_dds_object.rds",
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
+    expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.results.tsv.gz",
+           contrast=CONTRAST_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
     # QC plots
     expand(f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
            correction=ACTIVE_CORRECTION_METHODS_QC),
@@ -400,17 +431,23 @@ rule all:
            correction=ACTIVE_CORRECTION_METHODS_QC),
     f"{OUTPUT_DIR}/qc/field_collinearity.tsv.gz",
     # DGE plots
-    expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}_{{plot}}_plot_{{lfc}}.pdf",
-           contrast=CONTRAST_NAMES, plot = { "ma", "volcano" },
-           lfc = { "shrunk", "unshrunk" }),
+    expand(f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.{{plot}}_plot_{{lfc}}.pdf",
+           contrast=CONTRAST_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
+           plot = { "ma", "volcano" }, lfc = { "shrunk", "unshrunk" }),
     # GSEA results
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{table}}.tsv.gz",
-           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
-           table = { "all", "signif", "driver_genes" }),
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
-           contrast=CONTRAST_NAMES, gsea=GO_GSEA_NAMES),
-    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_{{plot}}.pdf",
-           contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_{{table}}.tsv.gz",
+           contrast=CONTRAST_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
+           gsea=GSEA_NAMES, table = { "all", "signif", "driver_genes" }),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_signif_simplified.tsv.gz",
+           contrast=CONTRAST_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
+           gsea=GO_GSEA_NAMES),
+    expand(f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_{{plot}}.pdf",
+           contrast=CONTRAST_NAMES,
+           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
+           gsea=GSEA_NAMES,
            plot = { "plot", "ridge_plot", "lollipop_plot" }),
     # GSEA summary results (only if multiple contrasts)
     *_AGGREGATE_GSEA_OUTPUTS,
@@ -441,21 +478,22 @@ rule deseq2_fit:
     condition_fields = CONDITION_FIELD_NAMES,
     confounder_fields = CONFOUNDER_FIELD_NAMES,
     confounder_field_types = CONFOUNDER_FIELD_TYPES,
-  output: dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
-  log: f"{OUTPUT_DIR}/logs/deseq2_fit.log"
+  output: dds_rds = f"{OUTPUT_DIR}/deseq2/{{confounder_handling}}_dds_object.rds",
+  log: f"{OUTPUT_DIR}/logs/deseq2_fit.{{confounder_handling}}.log"
   conda: "envs/deseq2_fit.yaml"
   script: "scripts/deseq2_fit.R"
 
 def _dds_for_contrast(wildcards):
   spec = CONTRAST_SPECS[wildcards.contrast]
+  handling = wildcards.confounder_handling
   if spec["type"] == "pairwise":
     denom = spec["denominator"]
-    return f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{denom}.rds"
-  return rules.deseq2_fit.output.dds_rds
+    return f"{OUTPUT_DIR}/deseq2/{handling}_dds_object_relevel_{denom}.rds"
+  return f"{OUTPUT_DIR}/deseq2/{handling}_dds_object.rds"
 
 rule deseq2_relevel:
   input:
-    dds_rds = f"{OUTPUT_DIR}/deseq2/dds_object.rds",
+    dds_rds = rules.deseq2_fit.output.dds_rds,
     confounders_lib = rules.deseq2_fit.input.confounders_lib,
     # ^-- explicitly re-run upon code change
   params:
@@ -464,8 +502,9 @@ rule deseq2_relevel:
     confounder_field_types = CONFOUNDER_FIELD_TYPES,
   output:
     dds_rds =
-      f"{OUTPUT_DIR}/deseq2/dds_object_relevel_{{reference_factor}}.rds",
-  log: f"{OUTPUT_DIR}/logs/deseq2_relevel_{{reference_factor}}.log"
+      f"{OUTPUT_DIR}/deseq2/{{confounder_handling}}_dds_object_relevel_{{reference_factor}}.rds",
+  log:
+    f"{OUTPUT_DIR}/logs/deseq2_relevel.{{confounder_handling}}.{{reference_factor}}.log"
   conda: "envs/deseq2_relevel.yaml"
   script: "scripts/deseq2_relevel.R"
 
@@ -476,15 +515,16 @@ rule deseq2_contrast:
     padj_threshold = config["deseq2"]["padj_threshold"],
     log2fc_threshold = config["deseq2"].get("log2fc_threshold", 0.0),
     expected_shrinkable = lambda wc: wc.contrast in SHRINKABLE_CONTRASTS,
-  output: results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
-  log: f"{OUTPUT_DIR}/logs/deseq2_contrast_{{contrast}}.log"
+  output:
+    results = f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.results.tsv.gz",
+  log: f"{OUTPUT_DIR}/logs/deseq2_contrast_{{contrast}}.{{confounder_handling}}.log"
   conda: "envs/deseq2_contrast.yaml"
   script: "scripts/deseq2_contrast.R"
 
 rule vst_blind:
   input: dds_rds = rules.deseq2_fit.output.dds_rds,
-  output: vst = f"{OUTPUT_DIR}/deseq2/vst_blind.rds",
-  log: f"{OUTPUT_DIR}/logs/vst_blind.log"
+  output: vst = f"{OUTPUT_DIR}/deseq2/{{confounder_handling}}_vst_blind.rds",
+  log: f"{OUTPUT_DIR}/logs/vst_blind.{{confounder_handling}}.log"
   conda: "envs/vst_blind.yaml"
   script: "scripts/vst_blind.R"
 
@@ -494,8 +534,8 @@ rule batch_correct:
       c for c in CORRECTION_METHODS_QC if c not in CORRECTION_METHODS
     )
   input:
-    dds_rds = rules.deseq2_fit.output.dds_rds,
-    vst = rules.vst_blind.output.vst,
+    dds_rds = QC_DDS,
+    vst = QC_VST_BLIND,
   output: vst = f"{OUTPUT_DIR}/deseq2/vst_corrected_{{correction}}.rds",
   log: f"{OUTPUT_DIR}/logs/batch_correct_{{correction}}.log"
   conda: "envs/batch_correct.yaml"
@@ -503,12 +543,12 @@ rule batch_correct:
 
 def _assay_for_pca(wildcards):
   if wildcards.correction == "uncorrected":
-    return rules.vst_blind.output.vst
+    return QC_VST_BLIND
   return f"{OUTPUT_DIR}/deseq2/vst_corrected_{wildcards.correction}.rds"
 
 rule plot_pca:
   input:
-    dds_rds = rules.deseq2_fit.output.dds_rds,
+    dds_rds = QC_DDS,
     assay = _assay_for_pca,
     plot_theme_lib = workflow.source_path("scripts/lib/plot_theme.R"),
     # ^-- explicitly re-run upon code change
@@ -529,7 +569,7 @@ rule plot_pca:
 
 rule pc_field_association:
   input:
-    dds_rds = rules.deseq2_fit.output.dds_rds,
+    dds_rds = QC_DDS,
     pca_scores = rules.plot_pca.output.scores,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = workflow.source_path("scripts/lib/association.R"),
@@ -549,7 +589,7 @@ rule pc_field_association:
 
 rule field_collinearity:
   input:
-    dds_rds = rules.deseq2_fit.output.dds_rds,
+    dds_rds = QC_DDS,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = rules.pc_field_association.input.association_lib,
     heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
@@ -583,8 +623,9 @@ rule plot_volcano:
     genes_of_interest = GENES_OF_INTEREST,
   output:
     volcano =
-      f"{OUTPUT_DIR}/deseq2/{{contrast}}_volcano_plot_{{lfc_type}}.pdf",
-  log: f"{OUTPUT_DIR}/logs/plot_volcano_{{contrast}}_{{lfc_type}}.log"
+      f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.volcano_plot_{{lfc_type}}.pdf",
+  log:
+    f"{OUTPUT_DIR}/logs/plot_volcano_{{contrast}}.{{confounder_handling}}.{{lfc_type}}.log"
   conda: "envs/plot_volcano.yaml"
   script: "scripts/plot_volcano.R"
 
@@ -603,20 +644,22 @@ rule plot_ma:
     color_down = rules.plot_volcano.params.color_down,
     color_none = rules.plot_volcano.params.color_none,
     genes_of_interest = rules.plot_volcano.params.genes_of_interest,
-  output: ma = f"{OUTPUT_DIR}/deseq2/{{contrast}}_ma_plot_{{lfc_type}}.pdf"
-  log: f"{OUTPUT_DIR}/logs/plot_ma_{{contrast}}_{{lfc_type}}.log"
+  output:
+    ma = f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.ma_plot_{{lfc_type}}.pdf"
+  log:
+    f"{OUTPUT_DIR}/logs/plot_ma_{{contrast}}.{{confounder_handling}}.{{lfc_type}}.log"
   conda: "envs/plot_ma.yaml"
   script: "scripts/plot_ma.R"
 
 rule gsea_run_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
   input:
-    results = f"{OUTPUT_DIR}/deseq2/{{contrast}}_results.tsv.gz",
+    results = rules.deseq2_contrast.output.results,
     ranking_lib = workflow.source_path("scripts/lib/gsea_ranking.R"),
     # ^-- explicitly re-run upon code change
   output:
     gsea_result_rds =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_result.rds"
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_result.rds"
   params:
     contrast_name = "{contrast}",
     gsea_name = "{gsea}",
@@ -626,7 +669,7 @@ rule gsea_run_go:
     ranking_stat = lambda wc: config["gsea"][wc.gsea]["ranking_stat"],
     min_set_size = lambda wc: config["gsea"][wc.gsea]["min_set_size"],
     max_set_size = lambda wc: config["gsea"][wc.gsea]["max_set_size"],
-  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_run.log"
+  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}.{{confounder_handling}}.{{gsea}}_run.log"
   conda: "envs/gsea_run_go.yaml"
   script: "scripts/gsea_run_go.R"
 
@@ -663,17 +706,19 @@ rule gsea_postprocess_go:
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
   output:
-    gsea_table_all = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_all.tsv.gz",
-    gsea_table_signif = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif.tsv.gz",
+    gsea_table_all =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_all.tsv.gz",
+    gsea_table_signif =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_signif.tsv.gz",
     gsea_table_simplified =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_signif_simplified.tsv.gz",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_signif_simplified.tsv.gz",
     gsea_driver_genes =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_driver_genes.tsv.gz",
-    gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_plot.pdf",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_driver_genes.tsv.gz",
+    gsea_plot = f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_plot.pdf",
     gsea_ridge_plot =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_ridge_plot.pdf",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_ridge_plot.pdf",
     gsea_lollipop_plot =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}_{{gsea}}_gsea_lollipop_plot.pdf",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_lollipop_plot.pdf",
   params:
     contrast_name = rules.gsea_run_go.params.contrast_name,
     gsea_name = rules.gsea_run_go.params.gsea_name,
@@ -684,7 +729,8 @@ rule gsea_postprocess_go:
     color_down = rules.plot_volcano.params.color_down,
     color_none = rules.plot_volcano.params.color_none,
     lollipop_size = config["gsea_plots"]["lollipop_plot"]["size"],
-  log: f"{OUTPUT_DIR}/logs/gsea_{{contrast}}_{{gsea}}_postprocess.log"
+  log:
+    f"{OUTPUT_DIR}/logs/gsea_{{contrast}}.{{confounder_handling}}.{{gsea}}_postprocess.log"
   conda: "envs/gsea_postprocess_go.yaml"
   script: "scripts/gsea_postprocess.R"
 
@@ -701,17 +747,23 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
 
 rule aggregate_gsea:
   input:
+    # Order matters: gsea_summary.R pairs these positionally with
+    # `group_names` (CONTRAST_NAMES). Only `contrast` varies in this expand().
     gsea_tables = lambda wc: expand(
       rules.gsea_postprocess_go.output.gsea_table_all,
-      contrast=CONTRAST_NAMES, gsea=wc.gsea
+      contrast=CONTRAST_NAMES, gsea=wc.gsea,
+      confounder_handling=wc.confounder_handling
     ),
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
     # ^-- explicitly re-run upon code change
   output:
-    summary_table = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary.tsv.gz",
-    heatmap = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_summary_heatmap.pdf",
-    jaccard = f"{OUTPUT_DIR}/gsea/{{gsea}}_gsea_jaccard.tsv.gz",
+    summary_table =
+      f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary.tsv.gz",
+    heatmap =
+      f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary_heatmap.pdf",
+    jaccard =
+      f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_jaccard.tsv.gz",
   params:
     grouping_var = "contrast",
     group_names = CONTRAST_NAMES,
@@ -725,6 +777,6 @@ rule aggregate_gsea:
     color_down = rules.plot_volcano.params.color_down,
     color_none = rules.plot_volcano.params.color_none,
     color_na = config["colors"]["direction"].get("na", "grey90"),
-  log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}_aggregate.log"
+  log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}.{{confounder_handling}}.aggregate.log"
   conda: "envs/gsea_summary.yaml"
   script: "scripts/gsea_summary.R"
