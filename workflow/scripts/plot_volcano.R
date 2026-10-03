@@ -16,6 +16,9 @@ cat("=== Plot: Volcano Plot ===\n")
 
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["plot_input_lib"]])
+source(snakemake@input[["plot_title_lib"]])
+confounder_handling <- snakemake@wildcards[["confounder_handling"]]
+cat("Confounder handling:", confounder_handling, "\n")
 log2fc_threshold <- snakemake@params[["log2fc_threshold"]]
 cat("log2FC threshold:", log2fc_threshold, "\n\n")
 
@@ -65,7 +68,7 @@ volcano_plot <- ggplot(
   scale_color_manual(values = category_colors,
                      labels = get_category_labels(results_df)) +
   labs(
-    title = paste0(contrast_name, " (", lfc_type, ")"),
+    title = format_plot_title(contrast_name, confounder_handling, lfc_type),
     x = lfc_label,
     y = "-Log10(Adjusted p-value)",
     color = ""

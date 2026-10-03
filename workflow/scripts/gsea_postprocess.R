@@ -30,6 +30,7 @@ cat("=== GSEA postprocess ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 source(snakemake@input[["plot_theme_lib"]])
+source(snakemake@input[["plot_title_lib"]])
 contrast_name <- snakemake@params[["contrast_name"]]
 gsea_name <- snakemake@params[["gsea_name"]]
 database <- snakemake@params[["database"]]
@@ -39,8 +40,10 @@ color_down <- snakemake@params[["color_down"]]
 color_none <- snakemake@params[["color_none"]]
 color_up <- snakemake@params[["color_up"]]
 lollipop_size <- snakemake@params[["lollipop_size"]]
+confounder_handling <- snakemake@wildcards[["confounder_handling"]]
 
 cat("Contrast:", contrast_name, "\n")
+cat("Confounder handling:", confounder_handling, "\n")
 cat("Analysis name:", gsea_name, "\n")
 cat("Database:", database, "\n\n")
 
@@ -307,7 +310,10 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
     ) +
     coord_flip() +
     labs(
-      title = paste("Top Enriched Pathways:", contrast_name),
+      title = paste(
+        "Top Enriched Pathways:",
+        format_plot_title(contrast_name, confounder_handling)
+      ),
       y = "-Log10(Adjusted p-value)",
       x = "",
       fill = "NES"
@@ -330,7 +336,9 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
 cat("\nGenerating GSEA ridge plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_ridge <- ridgeplot(gsea_result, showCategory = gene_sets_of_interest) +
-    labs(title = paste("GSEA Ridge Plot:", contrast_name))
+    labs(title = paste(
+      "GSEA Ridge Plot:", format_plot_title(contrast_name, confounder_handling)
+    ))
   save_plot(snakemake@output[["gsea_ridge_plot"]], gsea_ridge)
   cat("Ridge plot saved:", snakemake@output[["gsea_ridge_plot"]], "\n")
 } else {

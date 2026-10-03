@@ -612,6 +612,8 @@ rule plot_volcano:
     # ^-- explicitly re-run upon code change
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
+    plot_title_lib = workflow.source_path("scripts/lib/plot_title.R"),
+    # ^-- explicitly re-run upon code change
   params:
     contrast_name = "{contrast}",
     lfc_type = "{lfc_type}",
@@ -635,6 +637,8 @@ rule plot_ma:
     plot_input_lib = rules.plot_volcano.input.plot_input_lib,
     # ^-- explicitly re-run upon code change
     plot_theme_lib = rules.plot_volcano.input.plot_theme_lib,
+    # ^-- explicitly re-run upon code change
+    plot_title_lib = rules.plot_volcano.input.plot_title_lib,
     # ^-- explicitly re-run upon code change
   params:
     contrast_name = rules.plot_volcano.params.contrast_name,
@@ -705,6 +709,8 @@ rule gsea_postprocess_go:
     gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
+    plot_title_lib = rules.plot_volcano.input.plot_title_lib,
+    # ^-- explicitly re-run upon code change
   output:
     gsea_table_all =
       f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_all.tsv.gz",
@@ -756,6 +762,7 @@ rule aggregate_gsea:
     ),
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
+    plot_title_lib = rules.plot_volcano.input.plot_title_lib,
     # ^-- explicitly re-run upon code change
   output:
     summary_table =

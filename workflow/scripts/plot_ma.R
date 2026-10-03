@@ -16,6 +16,9 @@ cat("=== Plot: MA Plot ===\n")
 
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["plot_input_lib"]])
+source(snakemake@input[["plot_title_lib"]])
+confounder_handling <- snakemake@wildcards[["confounder_handling"]]
+cat("Confounder handling:", confounder_handling, "\n")
 
 n_na <- sum(is.na(results_df$padj))
 if (n_na > 0) {
@@ -47,7 +50,7 @@ ma_plot <- ggplot(
   scale_color_manual(values = category_colors,
                      labels = get_category_labels(results_df)) +
   labs(
-    title = paste0(contrast_name, " (", lfc_type, ")"),
+    title = format_plot_title(contrast_name, confounder_handling, lfc_type),
     x = "Mean Expression (baseMean, log10 scale)",
     y = lfc_label,
     color = paste0("padj < ", padj_threshold)

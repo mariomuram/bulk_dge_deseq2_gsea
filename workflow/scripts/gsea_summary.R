@@ -239,7 +239,7 @@ gsea_heatmap_layout <- function(selected_pathways, group_names) {
 plot_gsea_heatmap <- function(display_df, id_description, selected_pathways,
                               group_names, grouping_var, padj_threshold,
                               color_up, color_down, color_none, color_na,
-                              gsea_name, layout) {
+                              gsea_name, layout, confounder_handling = NULL) {
   heatmap_df <- display_df %>%
     filter(id %in% selected_pathways$id) %>%
     select(-description) %>%
@@ -270,7 +270,10 @@ plot_gsea_heatmap <- function(display_df, id_description, selected_pathways,
       axis.text.y = element_text(size = layout$y_text_pt)
     ) +
     labs(
-      title = paste0("Cross-", grouping_var, " GSEA summary: ", gsea_name),
+      title = paste0(
+        "Cross-", grouping_var, " GSEA summary: ",
+        format_plot_title(gsea_name, confounder_handling)
+      ),
       x = "", y = "", fill = "NES",
       caption = paste0("* = padj < ", padj_threshold)
     )
@@ -326,6 +329,7 @@ get_input <- function(name) {
 
 source(get_input("plot_theme_lib"))
 source(get_input("heatmap_theme_lib"))
+source(get_input("plot_title_lib"))
 
 gsea_name <- require_param("gsea_name")
 grouping_var <- require_param("grouping_var")
@@ -339,6 +343,9 @@ color_na <- require_param("color_na")
 gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
 rank_heuristic <- snakemake@params[["rank_heuristic"]]
 if (is.null(rank_heuristic)) rank_heuristic <- "breadth"
+# NULL if the rule has no `confounder_handling` wildcard (a summary that
+# compares confounder handlings has them as groups instead).
+confounder_handling <- snakemake@wildcards[["confounder_handling"]]
 
 rank_fns <- list(breadth = rank_by_breadth, divergence = rank_by_divergence)
 if (!rank_heuristic %in% names(rank_fns)) {
@@ -349,6 +356,7 @@ if (!rank_heuristic %in% names(rank_fns)) {
 }
 
 cat("Analysis name:", gsea_name, "\n")
+cat("Confounder handling:", confounder_handling, "\n")
 cat("Grouping variable:", grouping_var, "\n")
 cat("Groups:", paste(group_names, collapse = ", "), "\n")
 cat("Ranking heuristic:", rank_heuristic, "\n")
@@ -434,7 +442,7 @@ if (nrow(display_df) > 0) {
   heatmap_plot <- plot_gsea_heatmap(
     display_df, id_description, selected_pathways, group_names,
     grouping_var, padj_threshold, color_up, color_down, color_none,
-    color_na, gsea_name, layout
+    color_na, gsea_name, layout, confounder_handling
   )
   # save_plot(filename, plot, width, height, ...): `...` -> ggsave
   save_plot(
