@@ -413,16 +413,29 @@ rule all:
     # GSEA summary results (only if multiple contrasts)
     *_AGGREGATE_GSEA_OUTPUTS,
 
-rule deseq2_fit:
-  input:
-    count_files = COUNT_FILE_PATHS,
-    confounders_lib = workflow.source_path("scripts/lib/confounders.R"),
-    # ^-- explicitly re-run upon code change
+rule merge_counts:
+  input: count_files = COUNT_FILE_PATHS
   params:
     samples_info = SAMPLES_INFO,
     sample_fields = SAMPLE_FIELDS,
-    reference_levels = REFERENCE_LEVELS,
     file_to_samples = FILE_TO_SAMPLES,
+    condition_fields = CONDITION_FIELD_NAMES,
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
+  output:
+    counts = f"{OUTPUT_DIR}/quantification_results/merged_counts.tsv.gz",
+    coldata = f"{OUTPUT_DIR}/sample_annotation/coldata.tsv.gz",
+  log: f"{OUTPUT_DIR}/logs/merge_counts.log"
+  conda: "envs/merge_counts.yaml"
+  script: "scripts/merge_counts.R"
+
+rule deseq2_fit:
+  input:
+    counts = rules.merge_counts.output.counts,
+    coldata = rules.merge_counts.output.coldata,
+    confounders_lib = workflow.source_path("scripts/lib/confounders.R"),
+    # ^-- explicitly re-run upon code change
+  params:
+    reference_levels = REFERENCE_LEVELS,
     condition_fields = CONDITION_FIELD_NAMES,
     confounder_fields = CONFOUNDER_FIELD_NAMES,
     confounder_field_types = CONFOUNDER_FIELD_TYPES,

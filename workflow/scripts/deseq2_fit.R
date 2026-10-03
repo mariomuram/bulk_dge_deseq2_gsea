@@ -1,6 +1,7 @@
 #!/usr/bin/env Rscript
-# DESeq2 fit: build the count matrix, run normalization,
-# dispersion estimation and model fitting.
+# DESeq2 fit: read the merged, pre-filtered count matrix and sample sheet
+# (see merge_counts.R), run normalization, dispersion estimation and model
+# fitting.
 #
 # The design is the full crossing of every parsed sample field
 # (all main effects and interactions), built and fit as an
@@ -33,185 +34,42 @@ cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 source(snakemake@input[["confounders_lib"]])
 
-# --- Read and merge count matrices (from multiple files) ---------------
+# --- Read the merged, pre-filtered counts and the sample sheet ---------
+# Both written by merge_counts.R (see there for the file layout).
 
-count_files <- snakemake@input[["count_files"]]  # vector of file paths
-file_to_samples <- snakemake@params[["file_to_samples"]]  # file path -> samples mapping
+counts_file <- snakemake@input[["counts"]]
+coldata_file <- snakemake@input[["coldata"]]
 
-if (length(count_files) == 1L) {
-  cat("Reading count matrix...\n")
-} else {
-  cat("Reading count matrices from multiple files...\n")
-  cat("Expected files:", paste(count_files, collapse = ", "), "\n")
+cat("Reading merged counts:", counts_file, "\n")
+counts_df <- read_tsv(
+  counts_file,
+  col_types = cols(gene_id = col_character(), .default = col_double())
+)
+counts_matrix <- as.matrix(counts_df[, -1, drop = FALSE])
+rownames(counts_matrix) <- counts_df$gene_id
+if (any(counts_matrix != round(counts_matrix))) {
+  stop("ERROR: ", counts_file, " contains non-integer counts.")
 }
+storage.mode(counts_matrix) <- "integer"
+cat("Counts:", nrow(counts_matrix), "genes x", ncol(counts_matrix),
+    "samples\n")
 
-# Extract all samples from all files
-all_samples <- do.call(c, lapply(file_to_samples,
-                                  function(file) { names(file$samples) }))
+# Every column is read back as plain strings (na = character(): a field value
+# that happens to read "NA" is a value, not a missing one); the factor levels
+# (and thereby the reference levels) are set below from the `reference_levels`
+# param.
+cat("Reading sample sheet:", coldata_file, "\n")
+coldata <- as.data.frame(
+  read_tsv(coldata_file, col_types = cols(.default = col_character()),
+           na = character(), trim_ws = FALSE)
+)
+rownames(coldata) <- coldata$sample
+stopifnot(identical(colnames(counts_matrix), coldata$sample))
 
-# Check for duplicates within each file
-for (i in seq_along(file_to_samples)) {
-  file_samples <- names(file_to_samples[[i]]$samples)
-  duplicated_in_file <- file_samples[duplicated(file_samples)]
-  if (length(duplicated_in_file) > 0) {
-    stop(
-      "ERROR: the following sample(s) appear multiple times in file ",
-      count_files[i], ": ",
-      paste(duplicated_in_file, collapse = ", ")
-    )
-  }
-}
-
-# Check for duplicates across files
-sample_counts <- table(all_samples)
-duplicated_samples <- names(sample_counts)[sample_counts > 1]
-if (length(duplicated_samples) > 0) {
-  stop(
-    "ERROR: the following sample(s) appear in more than one file: ",
-    paste(duplicated_samples, collapse = ", ")
-  )
-}
-
-cat("Total samples to load:", length(sample_counts), "\n\n")
-
-# Read all files and merge on gene_id
-file_to_counts <- list()
-seen_genes <- NULL
-
-for (file_path in count_files) {
-  cat("Reading:", file_path, "\n")
-
-  file_idx <- which(sapply(file_to_samples,
-                           function(file) { if ("path" %in% names(file))
-                                              return(file$path)
-                                            return(NULL) })
-                      == file_path)
-  if (length(file_idx) == 0L) {
-    stop(
-      "ERROR: the following file path is not listed in the file-to-samples ",
-      "mapping: ", file_path
-    )
-  } else {
-    if (length(file_idx) > 1L) {
-      stop(
-        "ERROR: the following file path is listed several times in the",
-        "file-to-samples mapping:",
-        paste(names(file_to_samples)[file_idx], collapse = ", ")
-      )
-    }
-  }
-  stopifnot(length(file_idx) == 1L)
-  file_key <- names(file_to_samples)[[file_idx]]
-  file_samples <- names(file_to_samples[[file_idx]]$samples)
-  n_annotation_cols <- file_to_samples[[file_idx]]$annotation_columns
-
-  df <- read_tsv(file_path, show_col_types = FALSE)
-
-  # First column is gene_id; the next `n_annotation_cols` columns are
-  # unused annotation (e.g. RSEM's transcript_id(s)); the rest are samples.
-  gene_col <- df[[1]]
-  sample_cols <- colnames(df)[-seq_len(1 + n_annotation_cols)]
-  file_idx <- which(sapply(file_to_samples,
-                           function(file) { if ("path" %in% names(file))
-                                              return(file$path)
-                                            return(NULL) })
-                      == file_path)
-  if (length(file_idx) == 0L) {
-    stop(
-      "ERROR: the following file path is not listed in the file-to-samples ",
-      "mapping: ", file_path
-    )
-  } else {
-    if (length(file_idx) > 1L) {
-      stop(
-        "ERROR: the following file path is listed several times in the",
-        "file-to-samples mapping:",
-        paste(names(file_to_samples)[file_idx], collapse = ", ")
-      )
-    }
-  }
-  stopifnot(length(file_idx) == 1L)
-  file_key <- names(file_to_samples)[[file_idx]]
-  file_samples <- names(file_to_samples[[file_idx]]$samples)
-  if (length(file_samples) == 0L) {
-    stop(
-      "ERROR: the following file path is not associated to any sample(s): ",
-      file_path
-    )
-  }
-  missing_samples <- setdiff(file_samples, sample_cols)
-  if (length(missing_samples) > 0L) {
-    stop(
-      "ERROR: the following sample(s) is/are missing from `", file_path, "`:",
-      paste(missing_samples, collapse = ", ")
-    )
-  }
-  extra_samples <- setdiff(sample_cols, file_samples)
-  if (length(extra_samples) > 0L) {
-    cat(
-      "WARNING: `", file_path, "` contains the following extra sample(s):\n  ",
-      paste(extra_samples, collapse = ", "), "\n...dropping\n", sep = ""
-    )
-  }
-  
-  cat("  Genes:", nrow(df), ", Samples:", length(sample_cols), "(kept:",
-      length(file_samples), ")\n")
-  
-  # Check gene consistency
-  if (is.null(seen_genes)) {
-    seen_genes <- gene_col
-  } else {
-    if (!identical(gene_col, seen_genes)) {
-      stop(
-        "ERROR: gene set in ", file_path, " does not match ",
-        "the first file. Genes must be identical across all files ",
-        "(same set, same order). Use an explicit gene_id join if ",
-        "gene sets differ."
-      )
-    }
-  }
-  
-  file_to_samples[[file_key]] <- file_samples
-  file_to_counts[[file_key]] <- df[, file_samples, drop = FALSE]
-}
-
-gene_ids <- seen_genes
-
-# Merge all count matrices side-by-side
-# (same gene order across all files means cbind is safe)
-counts_matrix <- do.call(cbind, unname(file_to_counts))
-counts_matrix <- as.matrix(counts_matrix)
-rownames(counts_matrix) <- gene_ids
-
-# Double-check that columns match file_to_samples keys (parsed sample IDs)
-expected_samples <- names(sample_counts)
-actual_samples <- colnames(counts_matrix)
-stopifnot(setequal(expected_samples, actual_samples))
-
-cat("\nMerged dimensions:", nrow(counts_matrix), "genes x",
-    ncol(counts_matrix), "samples (total across all files)\n")
-
-
-# --- Build sample metadata (fields parsed in the Snakefile) --------
-
-samples_info <- snakemake@params[["samples_info"]]    # sample -> label
-sample_fields <- snakemake@params[["sample_fields"]]   # sample -> list
-
-missing_samples <- setdiff(names(samples_info), colnames(counts_matrix))
-if (length(missing_samples) > 0) {
-  stop(
-    "ERROR: sample(s) listed in config.yaml 'samples' are not ",
-    "present in the count matrix: ",
-    paste(missing_samples, collapse = ", ")
-  )
-}
-
-cat("\nUsing", length(samples_info), "of",
-    ncol(counts_matrix), "samples found in count matrix.\n")
-
-counts_matrix <- counts_matrix[, names(samples_info), drop = FALSE]
-
-field_names <- names(sample_fields[[1]])
+# Snakefile: REFERENCE_LEVELS has one entry per parsed sample field.
+reference_levels <- snakemake@params[["reference_levels"]]
+field_names <- names(reference_levels)
+stopifnot(all(field_names %in% colnames(coldata)))
 cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
 condition_field_names <- unlist(snakemake@params[["condition_fields"]])
@@ -229,48 +87,8 @@ if (length(confounder_field_names) > 0) {
 stopifnot(all(union(condition_field_names, confounder_field_names)
               %in% field_names))
 
-coldata <- data.frame(
-  sample = colnames(counts_matrix),
-  condition = unlist(samples_info)[colnames(counts_matrix)],
-  stringsAsFactors = FALSE
-)
-for (f in field_names) {
-  coldata[[f]] <- vapply(
-    sample_fields[colnames(counts_matrix)],
-    function(x) x[[f]], character(1)
-  )
-}
-rownames(coldata) <- coldata$sample
-
 cat("\nSample sheet:\n")
 print(coldata)
-
-field_has_na <- vapply(coldata[field_names], anyNA, logical(1))
-if (anyNA(coldata$condition) || any(field_has_na)) {
-  stop(
-    "ERROR: could not map all samples to their condition/",
-    "fields. Check config.yaml 'samples' and ",
-    "'sample_label_pattern'."
-  )
-}
-
-cat("\nReplicates per condition:\n")
-print(table(coldata$condition))
-
-n_per_condition <- table(coldata$condition)
-if (any(n_per_condition < 2)) {
-  cat(
-    "WARNING: at least one condition has fewer than 2",
-    "replicates. DESeq2 requires n >= 2 per group; results",
-    "for affected contrasts will likely fail or be unreliable.\n"
-  )
-} else if (any(n_per_condition == 2)) {
-  cat(
-    "NOTE: minimum replicate number is 2. Dispersion",
-    "estimates from n = 2 are noisy; treat results as",
-    "exploratory and interpret with caution.\n"
-  )
-}
 
 # --- Apply reference levels ------------------------------------------
 # Affects resultsNames()/coefficient signs and which
@@ -278,7 +96,6 @@ if (any(n_per_condition < 2)) {
 # full-crossing matrix below; does not affect fitted group means
 # or dispersions.
 
-reference_levels <- snakemake@params[["reference_levels"]]
 cat("\nReference levels:\n")
 for (f in names(reference_levels)) {
   ref <- reference_levels[[f]]
@@ -374,20 +191,14 @@ print(colnames(full_mat))
 # supplied to DESeq() below via `full =`.
 
 dds <- DESeqDataSetFromMatrix(
-  countData = round(counts_matrix),
+  countData = counts_matrix,
   colData = coldata,
   design = ~condition
 )
 
+# Low-count genes were already removed by merge_counts.R.
 cat("DESeqDataSet created with", nrow(dds), "genes and",
     ncol(dds), "samples\n")
-
-# Pre-filtering: remove genes with very low counts
-cat("\nPre-filtering low-count genes (rowSums >= 10)...\n")
-keep <- rowSums(counts(dds)) >= 10
-cat("Genes removed:", sum(!keep), "\n")
-dds <- dds[keep, ]
-cat("Genes retained after filtering:", nrow(dds), "\n")
 
 # --- Run DESeq2 -------------------------------------------------------
 
