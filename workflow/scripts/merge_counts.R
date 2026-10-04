@@ -291,15 +291,10 @@ if (max(counts_matrix) > .Machine$integer.max) {
 }
 storage.mode(counts_matrix) <- "integer"
 
-write_gz_tsv <- function(df, path) {
-  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
-  con <- gzfile(path, open = "wb", compression = 9)
-  write_tsv(df, con)
-  close(con)
-}
-
+# write_tsv() gzip-compresses on its own, going by the .gz file extension.
 counts_file <- snakemake@output[["counts"]]
-write_gz_tsv(
+dir.create(dirname(counts_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(
   data.frame(gene_id = rownames(counts_matrix), counts_matrix,
              check.names = FALSE, row.names = NULL,
              stringsAsFactors = FALSE),
@@ -308,7 +303,8 @@ write_gz_tsv(
 cat("\nSaved counts:", counts_file, "\n")
 
 coldata_file <- snakemake@output[["coldata"]]
-write_gz_tsv(coldata, coldata_file)
+dir.create(dirname(coldata_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(coldata, coldata_file)
 cat("Saved coldata:", coldata_file, "\n")
 
 cat("\n=== Merge Counts Complete ===\n")

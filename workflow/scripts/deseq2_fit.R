@@ -82,7 +82,9 @@ if (length(confounder_field_names) > 0) {
   cat("Confounder fields (additive only):",
       paste(confounder_field_names, collapse = ", "), "\n")
 } else {
-  cat("No confounder fields configured.\n")
+  # Either none are configured, or ComBat-Seq has removed all of them from
+  # the counts beforehand.
+  cat("No confounder fields in the design.\n")
 }
 stopifnot(all(union(condition_field_names, confounder_field_names)
               %in% field_names))

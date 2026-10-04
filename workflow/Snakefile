@@ -229,7 +229,7 @@ del _FIELD_VALUES
 
 # --- Batch-correction stages and diagnostics ------------------------
 
-CORRECTION_METHODS = ["uncorrected"]  # produce real DGE output
+CORRECTION_METHODS = ["uncorrected", "combat_seq"]  # produce real DGE output
 CORRECTION_METHODS_QC = CORRECTION_METHODS + ["limma"]  # + diagnostics-only
 # Without confounders there is nothing to correct for: only the uncorrected
 # stage is ever requested (batch_correct.R additionally refuses to run).
@@ -242,7 +242,13 @@ ACTIVE_CORRECTION_METHODS_QC = (
 # (DESeq2 fit, contrasts, DGE plots, GSEA) with how confounders were dealt
 # with. One value per correction method that produces DGE output, plus
 # NO_CONFOUNDERS for runs that have no confounders to deal with at all.
-CONFOUNDER_HANDLING_FOR_CORRECTION = {"uncorrected": "confounders_modelled"}
+CONFOUNDER_HANDLING_FOR_CORRECTION = {
+  "uncorrected": "confounders_modelled",
+  "combat_seq": "confounders_corrected",
+}
+CORRECTION_FOR_CONFOUNDER_HANDLING = {
+  v: k for k, v in CONFOUNDER_HANDLING_FOR_CORRECTION.items()
+}
 CONFOUNDER_HANDLING_METHODS = list(CONFOUNDER_HANDLING_FOR_CORRECTION.values())
 NO_CONFOUNDERS = "no_confounders"
 ACTIVE_CONFOUNDER_HANDLING_METHODS = (
@@ -259,6 +265,40 @@ QC_CONFOUNDER_HANDLING = (
 )
 QC_DDS = f"{OUTPUT_DIR}/deseq2/{QC_CONFOUNDER_HANDLING}_dds_object.rds"
 QC_VST_BLIND = f"{OUTPUT_DIR}/deseq2/{QC_CONFOUNDER_HANDLING}_vst_blind.rds"
+
+# --- ComBat-Seq ----------------------------------------------------------
+# How combat_seq_correct.R deals with more than one confounder (documented
+# there). There is no on/off switch: ComBat-Seq runs iff `design.confounders`
+# is not empty.
+_COMBAT_SEQ_STRATEGIES = ("sequential", "preserve_extra", "composite")
+COMBAT_SEQ_STRATEGY = DESIGN.get("combat_seq", {}).get(
+  "multi_confounder_strategy", "sequential"
+)
+if COMBAT_SEQ_STRATEGY not in _COMBAT_SEQ_STRATEGIES:
+  raise ValueError(
+    f"`design.combat_seq.multi_confounder_strategy` is "
+    f"'{COMBAT_SEQ_STRATEGY}'. Allowed: {list(_COMBAT_SEQ_STRATEGIES)}."
+  )
+
+# Confounders that ComBat-Seq leaves in the counts: it can only correct for
+# discrete fields (`batch` is strictly discrete), so continuous fields are
+# merely preserved, and with `preserve_extra` all but the first discrete
+# field are. The DESeq2 fit on the corrected counts has to keep modelling
+# them, or nothing would control for them anywhere. (Declaration order, like
+# in combat_seq_correct.R; if there is no discrete field, that script stops.)
+_DISCRETE_CONFOUNDERS = [
+  f for f in CONFOUNDER_FIELD_NAMES if CONFOUNDER_FIELD_TYPES[f] != "continuous"
+]
+if COMBAT_SEQ_STRATEGY == "sequential":
+  COMBAT_SEQ_RESIDUAL_CONFOUNDERS = [
+    f for f in CONFOUNDER_FIELD_NAMES if f not in _DISCRETE_CONFOUNDERS
+  ]
+elif COMBAT_SEQ_STRATEGY == "preserve_extra":
+  COMBAT_SEQ_RESIDUAL_CONFOUNDERS = [
+    f for f in CONFOUNDER_FIELD_NAMES if f not in _DISCRETE_CONFOUNDERS[:1]
+  ]
+else:  # composite: one batch out of all (necessarily discrete) confounders
+  COMBAT_SEQ_RESIDUAL_CONFOUNDERS = []
 
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
@@ -467,16 +507,49 @@ rule merge_counts:
   conda: "envs/merge_counts.yaml"
   script: "scripts/merge_counts.R"
 
-rule deseq2_fit:
+rule combat_seq_correct:
   input:
     counts = rules.merge_counts.output.counts,
     coldata = rules.merge_counts.output.coldata,
     confounders_lib = workflow.source_path("scripts/lib/confounders.R"),
     # ^-- explicitly re-run upon code change
   params:
+    confounder_fields = CONFOUNDER_FIELD_NAMES,
+    confounder_field_types = CONFOUNDER_FIELD_TYPES,
+    multi_confounder_strategy = COMBAT_SEQ_STRATEGY,
+  output: counts = f"{OUTPUT_DIR}/combat_seq/corrected_counts.tsv.gz",
+  log: f"{OUTPUT_DIR}/logs/combat_seq_correct.log"
+  conda: "envs/combat_seq_correct.yaml"
+  script: "scripts/combat_seq_correct.R"
+
+def _counts_for_deseq2_fit(wildcards):
+  correction = CORRECTION_FOR_CONFOUNDER_HANDLING.get(
+    wildcards.confounder_handling
+  )
+  if correction == "combat_seq":
+    return rules.combat_seq_correct.output.counts
+  return rules.merge_counts.output.counts
+
+# The confounders that are terms of the DESeq2 design of a given analysis:
+# all of them unless ComBat-Seq has already removed some from the counts.
+def _confounder_fields_for_handling(wildcards):
+  correction = CORRECTION_FOR_CONFOUNDER_HANDLING.get(
+    wildcards.confounder_handling
+  )
+  if correction == "combat_seq":
+    return COMBAT_SEQ_RESIDUAL_CONFOUNDERS
+  return CONFOUNDER_FIELD_NAMES
+
+rule deseq2_fit:
+  input:
+    counts = _counts_for_deseq2_fit,
+    coldata = rules.merge_counts.output.coldata,
+    confounders_lib = workflow.source_path("scripts/lib/confounders.R"),
+    # ^-- explicitly re-run upon code change
+  params:
     reference_levels = REFERENCE_LEVELS,
     condition_fields = CONDITION_FIELD_NAMES,
-    confounder_fields = CONFOUNDER_FIELD_NAMES,
+    confounder_fields = _confounder_fields_for_handling,
     confounder_field_types = CONFOUNDER_FIELD_TYPES,
   output: dds_rds = f"{OUTPUT_DIR}/deseq2/{{confounder_handling}}_dds_object.rds",
   log: f"{OUTPUT_DIR}/logs/deseq2_fit.{{confounder_handling}}.log"
@@ -498,7 +571,7 @@ rule deseq2_relevel:
     # ^-- explicitly re-run upon code change
   params:
     reference_factor = "{reference_factor}",
-    confounder_fields = CONFOUNDER_FIELD_NAMES,
+    confounder_fields = rules.deseq2_fit.params.confounder_fields,
     confounder_field_types = CONFOUNDER_FIELD_TYPES,
   output:
     dds_rds =
@@ -544,6 +617,10 @@ rule batch_correct:
 def _assay_for_pca(wildcards):
   if wildcards.correction == "uncorrected":
     return QC_VST_BLIND
+  if wildcards.correction in CORRECTION_METHODS:
+    # Corrected counts: the blind VST of the dds fit on them.
+    handling = CONFOUNDER_HANDLING_FOR_CORRECTION[wildcards.correction]
+    return f"{OUTPUT_DIR}/deseq2/{handling}_vst_blind.rds"
   return f"{OUTPUT_DIR}/deseq2/vst_corrected_{wildcards.correction}.rds"
 
 rule plot_pca:
