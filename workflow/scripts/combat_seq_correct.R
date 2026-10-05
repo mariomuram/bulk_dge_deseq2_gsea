@@ -219,7 +219,7 @@ correct_composite <- function(counts, typed_coldata, group, discrete_fields,
 }
 
 apply_combat_seq <- function(counts, coldata, confounder_fields,
-                             confounder_field_types,
+                             confounder_field_types, discrete_fields,
                              strategy = "sequential") {
   stopifnot(identical(colnames(counts), rownames(coldata)))
   if (length(confounder_fields) == 0) {
@@ -228,13 +228,8 @@ apply_combat_seq <- function(counts, coldata, confounder_fields,
       "is nothing to correct for and this rule should not have been requested."
     )
   }
-  is_continuous <- vapply(
-    confounder_fields,
-    function(f) identical(confounder_field_types[[f]], "continuous"),
-    logical(1)
-  )
-  discrete_fields <- confounder_fields[!is_continuous]
-  continuous_fields <- confounder_fields[is_continuous]
+  stopifnot(all(discrete_fields %in% confounder_fields))
+  continuous_fields <- setdiff(confounder_fields, discrete_fields)
   cat("Strategy:", strategy, "\n")
   cat("Discrete confounders:",
       if (length(discrete_fields) > 0) paste(discrete_fields, collapse = ", ")
@@ -281,6 +276,8 @@ counts_file <- snakemake@input[["counts"]]
 coldata_file <- snakemake@input[["coldata"]]
 confounder_fields <- unlist(snakemake@params[["confounder_fields"]])
 confounder_field_types <- snakemake@params[["confounder_field_types"]]
+discrete_confounder_fields <-
+  unlist(snakemake@params[["discrete_confounder_fields"]])
 strategy <- snakemake@params[["multi_confounder_strategy"]]
 
 cat("Reading merged counts:", counts_file, "\n")
@@ -302,7 +299,8 @@ stopifnot(all(confounder_fields %in% colnames(coldata)))
 stopifnot("condition" %in% colnames(coldata))
 
 corrected <- apply_combat_seq(
-  counts, coldata, confounder_fields, confounder_field_types, strategy
+  counts, coldata, confounder_fields, confounder_field_types,
+  discrete_confounder_fields, strategy
 )
 
 # Final check of the combined result (every step was checked already).

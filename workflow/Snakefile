@@ -286,16 +286,16 @@ if COMBAT_SEQ_STRATEGY not in _COMBAT_SEQ_STRATEGIES:
 # field are. The DESeq2 fit on the corrected counts has to keep modelling
 # them, or nothing would control for them anywhere. (Declaration order, like
 # in combat_seq_correct.R; if there is no discrete field, that script stops.)
-_DISCRETE_CONFOUNDERS = [
+DISCRETE_CONFOUNDERS = [
   f for f in CONFOUNDER_FIELD_NAMES if CONFOUNDER_FIELD_TYPES[f] != "continuous"
 ]
 if COMBAT_SEQ_STRATEGY == "sequential":
   COMBAT_SEQ_RESIDUAL_CONFOUNDERS = [
-    f for f in CONFOUNDER_FIELD_NAMES if f not in _DISCRETE_CONFOUNDERS
+    f for f in CONFOUNDER_FIELD_NAMES if f not in DISCRETE_CONFOUNDERS
   ]
 elif COMBAT_SEQ_STRATEGY == "preserve_extra":
   COMBAT_SEQ_RESIDUAL_CONFOUNDERS = [
-    f for f in CONFOUNDER_FIELD_NAMES if f not in _DISCRETE_CONFOUNDERS[:1]
+    f for f in CONFOUNDER_FIELD_NAMES if f not in DISCRETE_CONFOUNDERS[:1]
   ]
 else:  # composite: one batch out of all (necessarily discrete) confounders
   COMBAT_SEQ_RESIDUAL_CONFOUNDERS = []
@@ -432,7 +432,7 @@ HEATMAP_TOP_N = config["gsea_summary"]["heatmap_top_n"]
 wildcard_constraints:
   contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
   reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
-  correction = "|".join(CORRECTION_METHODS_QC),
+  correction = "|".join(ACTIVE_CORRECTION_METHODS_QC),
   confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
@@ -517,6 +517,7 @@ rule combat_seq_correct:
     confounder_fields = CONFOUNDER_FIELD_NAMES,
     confounder_field_types = CONFOUNDER_FIELD_TYPES,
     multi_confounder_strategy = COMBAT_SEQ_STRATEGY,
+    discrete_confounder_fields = DISCRETE_CONFOUNDERS,
   output: counts = f"{OUTPUT_DIR}/combat_seq/corrected_counts.tsv.gz",
   log: f"{OUTPUT_DIR}/logs/combat_seq_correct.log"
   conda: "envs/combat_seq_correct.yaml"
