@@ -1,8 +1,11 @@
 #!/usr/bin/env Rscript
-# Cross-group GSEA summary, run once per database/analysis (i.e. once per
-# `gsea` wildcard -- gobp, hallmark, etc). "Group" is whatever
-# `grouping_var` names: "contrast" today, potentially "strategy" later
-# (reuse via `use rule aggregate_gsea as ... with: params:`).
+# Cross-group GSEA summary. Used by two rules, each fixing one dimension and
+# comparing across the other ("group" is whatever `grouping_var` names):
+#   - aggregate_gsea: one run per (gsea, confounder_handling);
+#     grouping_var = "contrast".
+#   - aggregate_gsea_by_strategy: one run per (contrast, gsea);
+#     grouping_var = "confounder_handling".
+# The second is derived from the first via `use rule ... with:`.
 #
 # Reads every group's gsea_table_all (ALL tested gene sets, not just that
 # group's own significant ones -- see gsea_postprocess.R). Unions the
@@ -39,7 +42,8 @@ load_group_tables <- function(input_paths, group_names, grouping_var) {
       "ERROR: got ", length(input_paths), " input table(s) but ",
       length(group_names), " group name(s) in params. These must line ",
       "up positionally (both come from the same ordered expand() in the ",
-      "Snakefile) -- check the aggregate_gsea rule's input and params. ",
+      "Snakefile) -- check the rule's `gsea_tables` input and `group_names` ",
+      "param. ",
       "Input paths seen: ", paste(input_paths, collapse = ", ")
     )
   }
@@ -239,7 +243,8 @@ gsea_heatmap_layout <- function(selected_pathways, group_names) {
 plot_gsea_heatmap <- function(display_df, id_description, selected_pathways,
                               group_names, grouping_var, padj_threshold,
                               color_up, color_down, color_none, color_na,
-                              gsea_name, layout, confounder_handling = NULL) {
+                              gsea_name, layout, confounder_handling = NULL,
+                              contrast_name = NULL) {
   heatmap_df <- display_df %>%
     filter(id %in% selected_pathways$id) %>%
     select(-description) %>%
@@ -271,8 +276,14 @@ plot_gsea_heatmap <- function(display_df, id_description, selected_pathways,
     ) +
     labs(
       title = paste0(
-        "Cross-", grouping_var, " GSEA summary: ",
-        format_plot_title(gsea_name, confounder_handling)
+        "Cross-", gsub("_", " ", grouping_var), " GSEA summary: ",
+        format_plot_title(gsea_name, confounder_handling),
+        # Only set by rules that fix a single contrast (strategy comparison).
+        if (!is.null(contrast_name) && nzchar(contrast_name)) {
+          paste0(" (", contrast_name, ")")
+        } else {
+          ""
+        }
       ),
       x = "", y = "", fill = "NES",
       caption = paste0("* = padj < ", padj_threshold)
@@ -346,6 +357,9 @@ if (is.null(rank_heuristic)) rank_heuristic <- "breadth"
 # NULL if the rule has no `confounder_handling` wildcard (a summary that
 # compares confounder handlings has them as groups instead).
 confounder_handling <- snakemake@wildcards[["confounder_handling"]]
+# NULL unless the rule fixes a single contrast (aggregate_gsea_by_strategy
+# sets it; the base aggregate_gsea rule does not).
+contrast_name <- snakemake@params[["contrast_name"]]
 
 rank_fns <- list(breadth = rank_by_breadth, divergence = rank_by_divergence)
 if (!rank_heuristic %in% names(rank_fns)) {
@@ -356,7 +370,9 @@ if (!rank_heuristic %in% names(rank_fns)) {
 }
 
 cat("Analysis name:", gsea_name, "\n")
-cat("Confounder handling:", confounder_handling, "\n")
+na_label <- function(x) if (is.null(x)) "(n/a)" else x
+cat("Confounder handling:", na_label(confounder_handling), "\n")
+cat("Contrast:", na_label(contrast_name), "\n")
 cat("Grouping variable:", grouping_var, "\n")
 cat("Groups:", paste(group_names, collapse = ", "), "\n")
 cat("Ranking heuristic:", rank_heuristic, "\n")
@@ -366,7 +382,9 @@ cat(
 )
 
 # The per-group tables are the named `gsea_tables` input, ordered as
-# group_names (both come from CONTRAST_NAMES in the Snakefile). Looked up by
+# group_names (both come from the same ordered list in the Snakefile:
+# CONTRAST_NAMES or ACTIVE_CONFOUNDER_HANDLING_METHODS, depending on the
+# rule). Looked up by
 # name so the lib-file inputs never enter the picture.
 input_paths <- unlist(get_input("gsea_tables"), use.names = FALSE)
 
@@ -442,7 +460,7 @@ if (nrow(display_df) > 0) {
   heatmap_plot <- plot_gsea_heatmap(
     display_df, id_description, selected_pathways, group_names,
     grouping_var, padj_threshold, color_up, color_down, color_none,
-    color_na, gsea_name, layout, confounder_handling
+    color_na, gsea_name, layout, confounder_handling, contrast_name
   )
   # save_plot(filename, plot, width, height, ...): `...` -> ggsave
   save_plot(
