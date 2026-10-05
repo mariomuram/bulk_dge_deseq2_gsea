@@ -59,7 +59,7 @@ pca_plot <- ggplot(pca_data,
   geom_point(size = default_point_size, alpha = 0.8) +
   scale_color_brewer(palette = palette) +
   labs(
-    title = paste0("PCA (all samples)", title_suffix),
+    title = paste0("PCA", title_suffix),
     x = paste0("PC1: ", percent_var[1], "% variance"),
     y = paste0("PC2: ", percent_var[2], "% variance"),
     color = color_label, shape = shape_label
