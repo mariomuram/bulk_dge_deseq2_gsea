@@ -441,17 +441,23 @@ wildcard_constraints:
 # Only aggregate GSEA results if there's more than one contrast
 _AGGREGATE_GSEA_OUTPUTS = []
 if len(CONTRAST_NAMES) > 1:
-  _AGGREGATE_GSEA_OUTPUTS = [
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary.tsv.gz",
-           gsea=GSEA_NAMES,
-           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_summary_heatmap.pdf",
-           gsea=GSEA_NAMES,
-           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
-    expand(f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_jaccard.tsv.gz",
-           gsea=GSEA_NAMES,
-           confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
-  ]
+  _AGGREGATE_GSEA_OUTPUTS = expand(
+    f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_{{suffix}}",
+    gsea=GSEA_NAMES, confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
+    suffix={"summary.tsv.gz", "summary_heatmap.pdf", "jaccard.tsv.gz"}
+  )
+
+# Only aggregate GSEA results if several confounder handling approaches are
+# used
+_HANDLING_METHOD_GSEA_OUTPUTS = []
+if len(ACTIVE_CONFOUNDER_HANDLING_METHODS) > 1:
+  _HANDLING_METHOD_GSEA_OUTPUTS = expand(
+    f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}" +
+      ".confounder_handling_comparison.{suffix}",
+    contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
+    suffix={"summary.tsv.gz", "heatmap.pdf", "jaccard.tsv.gz"}
+  )
+
 rule all:
   input:
     # DESeq2 results
@@ -489,8 +495,9 @@ rule all:
            confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
            gsea=GSEA_NAMES,
            plot = { "plot", "ridge_plot", "lollipop_plot" }),
-    # GSEA summary results (only if multiple contrasts)
-    *_AGGREGATE_GSEA_OUTPUTS,
+    # GSEA summary results (cross-contrast if multiple contrasts;
+    # cross-confounder-handling if confounders are configured)
+    *_AGGREGATE_GSEA_OUTPUTS, *_HANDLING_METHOD_GSEA_OUTPUTS,
 
 rule merge_counts:
   input: count_files = COUNT_FILE_PATHS
@@ -829,7 +836,7 @@ use rule gsea_postprocess_go as gsea_postprocess_hallmark with:
     gsea_lollipop_plot = rules.gsea_postprocess_go.output.gsea_lollipop_plot,
   conda: "envs/gsea_postprocess_hallmark.yaml"
 
-rule aggregate_gsea:
+rule aggregate_gsea_across_contrasts:
   input:
     # Order matters: gsea_summary.R pairs these positionally with
     # `group_names` (CONTRAST_NAMES). Only `contrast` varies in this expand().
@@ -865,3 +872,43 @@ rule aggregate_gsea:
   log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}.{{confounder_handling}}.aggregate.log"
   conda: "envs/gsea_summary.yaml"
   script: "scripts/gsea_summary.R"
+
+use rule aggregate_gsea_across_contrasts as aggregate_gsea_by_confounder_handling with:
+  input:
+    # Fixed contrast + gsea, expanded over every active confounder-handling
+    # strategy -- the inverse of the base rule's expand. `input` is
+    # replaced, not merged, so every input of the base rule is restated.
+    gsea_tables = lambda wc: expand(
+      rules.gsea_postprocess_go.output.gsea_table_all,
+      contrast=wc.contrast, gsea=wc.gsea,
+      confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS
+    ),
+    plot_theme_lib = rules.aggregate_gsea_across_contrasts.input.plot_theme_lib,
+    # ^-- explicitly re-run upon code change
+    heatmap_theme_lib = rules.aggregate_gsea_across_contrasts.input.heatmap_theme_lib,
+    # ^-- explicitly re-run upon code change
+    plot_title_lib = rules.aggregate_gsea_across_contrasts.input.plot_title_lib,
+    # ^-- explicitly re-run upon code change
+  output:
+    summary_table =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.summary.tsv.gz",
+    heatmap =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.heatmap.pdf",
+    jaccard =
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.jaccard.tsv.gz",
+  params:
+    grouping_var = "confounder_handling",
+    group_names = ACTIVE_CONFOUNDER_HANDLING_METHODS,
+    rank_heuristic = "divergence",  # overrides the base rule's "breadth"
+    contrast_name = "{contrast}",   # new param; unset on the base rule
+    gsea_name = rules.aggregate_gsea_across_contrasts.params.gsea_name,
+    padj_threshold =
+      rules.aggregate_gsea_across_contrasts.params.padj_threshold,
+    gene_sets_of_interest =
+      rules.aggregate_gsea_across_contrasts.params.gene_sets_of_interest,
+    heatmap_top_n = rules.aggregate_gsea_across_contrasts.params.heatmap_top_n,
+    color_up = rules.aggregate_gsea_across_contrasts.params.color_up,
+    color_down = rules.aggregate_gsea_across_contrasts.params.color_down,
+    color_none = rules.aggregate_gsea_across_contrasts.params.color_none,
+    color_na = rules.aggregate_gsea_across_contrasts.params.color_na,
+  log: f"{OUTPUT_DIR}/logs/gsea_{{gsea}}.{{contrast}}.confounder_handling_comparison.log"
