@@ -439,23 +439,25 @@ wildcard_constraints:
 
 
 # Only aggregate GSEA results if there's more than one contrast
+_GSEA_SUMMARY_OUTPUT_SUFFIXES = {"summary.tsv.gz", "summary_heatmap.pdf",
+                                 "jaccard.tsv.gz"}
 _AGGREGATE_GSEA_OUTPUTS = []
 if len(CONTRAST_NAMES) > 1:
   _AGGREGATE_GSEA_OUTPUTS = expand(
     f"{OUTPUT_DIR}/gsea/{{gsea}}.{{confounder_handling}}.gsea_{{suffix}}",
     gsea=GSEA_NAMES, confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS,
-    suffix={"summary.tsv.gz", "summary_heatmap.pdf", "jaccard.tsv.gz"}
+    suffix=_GSEA_SUMMARY_OUTPUT_SUFFIXES,
   )
 
-# Only aggregate GSEA results if several confounder handling approaches are
+# Only compare GSEA results if several confounder handling approaches are
 # used
 _HANDLING_METHOD_GSEA_OUTPUTS = []
 if len(ACTIVE_CONFOUNDER_HANDLING_METHODS) > 1:
   _HANDLING_METHOD_GSEA_OUTPUTS = expand(
     f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}" +
-      ".confounder_handling_comparison.{suffix}",
+      ".confounder_handling_comparison.gsea_{suffix}",
     contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
-    suffix={"summary.tsv.gz", "heatmap.pdf", "jaccard.tsv.gz"}
+    suffix=_GSEA_SUMMARY_OUTPUT_SUFFIXES,
   )
 
 rule all:
@@ -891,11 +893,11 @@ use rule aggregate_gsea_across_contrasts as aggregate_gsea_by_confounder_handlin
     # ^-- explicitly re-run upon code change
   output:
     summary_table =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.summary.tsv.gz",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.gsea_summary.tsv.gz",
     heatmap =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.heatmap.pdf",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.gsea_summary_heatmap.pdf",
     jaccard =
-      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.jaccard.tsv.gz",
+      f"{OUTPUT_DIR}/gsea/{{contrast}}.{{gsea}}.confounder_handling_comparison.gsea_jaccard.tsv.gz",
   params:
     grouping_var = "confounder_handling",
     group_names = ACTIVE_CONFOUNDER_HANDLING_METHODS,
