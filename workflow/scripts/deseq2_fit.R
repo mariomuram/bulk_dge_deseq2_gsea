@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/deseq2_fit.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-08-24
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  DESeq2 model fitting R script for the bulk RNA-seq DGE
+#           (DESeq2 + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # DESeq2 fit: read the merged, pre-filtered count matrix and sample sheet
 # (see merge_counts.R), run normalization, dispersion estimation and model
 # fitting.
@@ -20,8 +42,43 @@
 # deseq2_contrast.R can reuse the exact matrix that was fit,
 # rather than recomputing (and risking drift from) it.
 
+
+###########
+# License #
+###########
+
+# DESeq2 model fitting R script for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(DESeq2)
 library(readr)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -32,14 +89,32 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== DESeq2 Fit ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["confounders_lib"]])
 
-# --- Read the merged, pre-filtered counts and the sample sheet ---------
-# Both written by merge_counts.R (see there for the file layout).
+
+##############
+# Parameters #
+##############
 
 counts_file <- snakemake@input[["counts"]]
 coldata_file <- snakemake@input[["coldata"]]
+reference_levels <- snakemake@params[["reference_levels"]]
+condition_field_names <- unlist(snakemake@params[["condition_fields"]])
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+confounder_field_types <- snakemake@params[["confounder_field_types"]]
 
+
+#########
+# Input #
+#########
+
+# Read the merged, pre-filtered counts and the sample sheet (both written
+# by `merge_counts.R` - see there for the file layout).
 cat("Reading merged counts:", counts_file, "\n")
 counts_df <- read_tsv(
   counts_file,
@@ -67,14 +142,10 @@ rownames(coldata) <- coldata$sample
 stopifnot(identical(colnames(counts_matrix), coldata$sample))
 
 # Snakefile: REFERENCE_LEVELS has one entry per parsed sample field.
-reference_levels <- snakemake@params[["reference_levels"]]
 field_names <- names(reference_levels)
 stopifnot(all(field_names %in% colnames(coldata)))
 cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
-condition_field_names <- unlist(snakemake@params[["condition_fields"]])
-confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
-confounder_field_types <- snakemake@params[["confounder_field_types"]]
 cat("Condition fields (crossed):", paste(condition_field_names,
                                          collapse = ", "), "\n")
 confounder_mat <- NULL
@@ -92,7 +163,11 @@ stopifnot(all(union(condition_field_names, confounder_field_names)
 cat("\nSample sheet:\n")
 print(coldata)
 
-# --- Apply reference levels ------------------------------------------
+
+####################
+# Reference levels #
+####################
+
 # Affects resultsNames()/coefficient signs and which
 # combinations end up as the "fully reference" corner of the
 # full-crossing matrix below; does not affect fitted group means
@@ -105,8 +180,13 @@ for (f in names(reference_levels)) {
   coldata[[f]] <- relevel(factor(coldata[[f]]), ref = ref)
 }
 
-# --- Build the full-crossing design matrix, dropping any -----------
-# --- structurally-empty (all-zero) columns. -------------------------
+
+##########
+# Design #
+##########
+
+# Build the full-crossing design matrix, dropping any structurally-empty
+# (all-zero) columns.
 
 condition_formula <- as.formula(
   paste("~", paste(condition_field_names, collapse = "*"))
@@ -185,12 +265,16 @@ stopifnot(colnames(full_mat)[1] == "(Intercept)")
 cat("\nFinal design matrix columns (", ncol(full_mat), "):\n", sep = "")
 print(colnames(full_mat))
 
-# --- Build DESeqDataSet ------------------------------------------
-# design is a placeholder (~condition, always full rank by
-# construction) at object-creation time: DESeqDataSetFromMatrix
+
+#################
+# DESeq dataset #
+#################
+
+# `design` is a placeholder (`~condition`, always full rank by
+# construction) at object-creation time: `DESeqDataSetFromMatrix`
 # would itself reject the full, uncleaned crossing formula via
 # its own rank check. The actual (cleaned) design matrix is
-# supplied to DESeq() below via `full =`.
+# supplied to `DESeq()` below via `full =`.
 
 dds <- DESeqDataSetFromMatrix(
   countData = counts_matrix,
@@ -202,7 +286,10 @@ dds <- DESeqDataSetFromMatrix(
 cat("DESeqDataSet created with", nrow(dds), "genes and",
     ncol(dds), "samples\n")
 
-# --- Run DESeq2 -------------------------------------------------------
+
+##############
+# Run DESeq2 #
+##############
 
 cat("\nRunning DESeq2 (normalize, estimate dispersions, fit)",
     "with the cleaned full-crossing design matrix...\n")
@@ -243,7 +330,13 @@ if ("dispOutlier" %in% colnames(mcols(dds))) {
   }
 }
 
-# --- Sync column names to resultsNames(dds) before stashing --------
+
+########################
+# Column names syncing #
+########################
+
+# Sync column names to `resultsNames(dds)` before stashing.
+
 # DESeq2 relabels raw model.matrix() coefficient names for its
 # own resultsNames()/results(name=) interface -- notably ":" in
 # interaction terms becomes "." (e.g. "backgroundGATA2R396Q:doxdox"
@@ -271,7 +364,10 @@ colnames(full_mat) <- resultsNames(dds)
 cat("\nStashed model matrix columns (synced to resultsNames):\n")
 print(colnames(full_mat))
 
-# --- Stash fitted matrix and field names for downstream use ------
+
+#################################
+# Matrix & field names stashing #
+#################################
 
 metadata(dds)$full_model_matrix <- full_mat
 metadata(dds)$condition_model_matrix <- condition_mat
@@ -280,12 +376,20 @@ metadata(dds)$confounder_model_matrix <- confounder_mat
 metadata(dds)$condition_field_names <- condition_field_names
 metadata(dds)$confounder_field_names <- confounder_field_names
 
-# --- Save --------------------------------------------------------
+
+##########
+# Output #
+##########
 
 output_dds <- snakemake@output[["dds_rds"]]
 dir.create(dirname(output_dds), showWarnings = FALSE, recursive = TRUE)
 saveRDS(dds, output_dds)
 cat("\nSaved DESeqDataSet:", output_dds, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== DESeq2 Fit Complete ===\n")
 sink(type = "message")

@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/deseq2_contrast.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-08-24
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  DESeq2 contrast testing R script for the bulk RNA-seq DGE
+#           (DESeq2 + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # DESeq2 contrast extraction, with apeglm LFC shrinkage
 # attempted for every contrast.
 #
@@ -17,9 +39,44 @@
 # otherwise log2FoldChange_shrunk/lfcSE_shrunk are left NA with
 # a clear warning -- the unshrunk columns are unaffected.
 
+
+###########
+# License #
+###########
+
+# DESeq2 contrast testing R script for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(DESeq2)
 library(apeglm)
 library(readr)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -30,16 +87,10 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== DESeq2 Contrast Extraction ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
-dds_file <- snakemake@input[["dds_rds"]]
-cat("Loading DESeqDataSet:", dds_file, "\n")
-dds <- readRDS(dds_file)
 
-spec <- snakemake@params[["contrast_spec"]]
-contrast_type <- spec[["type"]]
-padj_threshold <- snakemake@params[["padj_threshold"]]
-log2fc_threshold <- snakemake@params[["log2fc_threshold"]]
-
-cat("Contrast type:", contrast_type, "\n")
+#############
+# Functions #
+#############
 
 check_replicates <- function(dds, conditions) {
   n_per_condition <- table(colData(dds)$condition)[conditions]
@@ -53,7 +104,32 @@ check_replicates <- function(dds, conditions) {
   }
 }
 
-# --- Extraction + coefficient resolution ----------------------------
+
+##############
+# Parameters #
+##############
+
+dds_file <- snakemake@input[["dds_rds"]]
+spec <- snakemake@params[["contrast_spec"]]
+contrast_type <- spec[["type"]]
+padj_threshold <- snakemake@params[["padj_threshold"]]
+log2fc_threshold <- snakemake@params[["log2fc_threshold"]]
+
+
+#########
+# Input #
+#########
+
+cat("Loading DESeqDataSet:", dds_file, "\n")
+dds <- readRDS(dds_file)
+
+
+cat("Contrast type:", contrast_type, "\n")
+
+
+###############################################
+# Results extraction & coefficient resolution #
+###############################################
 
 coef_name <- NULL  # resolved iff this contrast is apeglm-shrinkable
 
@@ -231,7 +307,10 @@ if (contrast_type == "pairwise") {
   stop("ERROR: unknown contrast type: ", contrast_type)
 }
 
-# --- Build the results table -----------------------------------------
+
+#################
+# Results table #
+#################
 
 res_df <- as.data.frame(res)
 res_df$gene_id <- rownames(res)
@@ -257,7 +336,10 @@ if (n_filtered_na > 0) {
   )
 }
 
-# --- Attempt apeglm shrinkage -----------------------------------------
+
+####################
+# ApeGLM shrinkage #
+####################
 
 expected_shrinkable <- isTRUE(snakemake@params[["expected_shrinkable"]])
 
@@ -315,6 +397,11 @@ if (!is.null(coef_name)) {
   res_df$lfcSE_shrunk <- NA_real_
 }
 
+
+###################
+# Summary logging #
+###################
+
 res_df <- res_df[order(res_df$padj), ]
 
 n_sig <- sum(
@@ -327,7 +414,10 @@ cat(
   "& |log2FC| >=", log2fc_threshold, "):", n_sig, "\n"
 )
 
-# --- Save (gzip --best compressed TSV) -----------------------------
+
+##########
+# Output #
+##########
 
 output_file <- snakemake@output[["results"]]
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
@@ -335,6 +425,11 @@ con <- gzfile(output_file, open = "wb", compression = 9)
 write_tsv(res_df, con)
 close(con)
 cat("\nSaved:", output_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== DESeq2 Contrast Extraction Complete ===\n")
 sink(type = "message")

@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/field_collinearity.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-01
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Sample annotation field collinearity check R script for the
+#           bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # QC: field x field collinearity matrix (not correction-specific: metadata
 # doesn't change across correction stages).
 #
@@ -24,10 +46,45 @@
 #   * Cramer's V is biased upward for sparse tables (few samples, many
 #     levels): two categorical fields can show a high V by chance at small n.
 
+
+###########
+# License #
+###########
+
+# Sample annotation field collinearity check R script for bulk RNA-seq DGE
+# (DESeq2 + GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(DESeq2)
 library(ggplot2)
 library(smartcor)
 library(readr)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -38,17 +95,39 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== QC: Field Collinearity Matrix ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["association_lib"]])
 source(snakemake@input[["heatmap_theme_lib"]])
 
-condition_field_names <- unlist(snakemake@params[["condition_fields"]])
-confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+
+#############
+# Functions #
+#############
 
 compute_field_collinearity_matrix <- function(coldata, field_types) {
   prepared <- prepare_association_data(coldata, field_types)
   compute_associations(prepared$data, prepared$types)
 }
+
+
+##############
+# Parameters #
+##############
+
+condition_field_names <- unlist(snakemake@params[["condition_fields"]])
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+table_file <- snakemake@output[["table"]]
+heatmap_file <- snakemake@output[["heatmap"]]
+
+
+#########
+# Input #
+#########
 
 dds <- readRDS(snakemake@input[["dds_rds"]])
 coldata <- as.data.frame(colData(dds))
@@ -58,6 +137,11 @@ if (length(field_types) < 2) {
   stop("ERROR: fewer than two fields left after excluding constant/identifier ",
        "types; nothing to compare.")
 }
+
+
+############################
+# Collinearity calculation #
+############################
 
 collinearity <- compute_field_collinearity_matrix(coldata, field_types)
 
@@ -72,15 +156,20 @@ if (n_valid == 0) {
   )
 }
 
-table_file <- snakemake@output[["table"]]
-dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
-write_tsv(collinearity, table_file)
-cat("Saved:", table_file, "\n")
+
+############
+# Ordering #
+############
 
 # Order: condition, confounder, other.
 role_rank <- ifelse(names(field_types) %in% condition_field_names, 1,
              ifelse(names(field_types) %in% confounder_field_names, 2, 3))
 field_order <- names(field_types)[order(role_rank, names(field_types))]
+
+
+###########
+# Heatmap #
+###########
 
 # Mirror the upper triangle for readability; diagonal = 1.
 heat_data <- rbind(
@@ -109,11 +198,24 @@ heatmap <- ggplot(heat_data, aes(x = a, y = b, fill = estimate)) +
   theme_heatmap_no_grid() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-output_file <- snakemake@output[["heatmap"]]
+
+##########
+# Output #
+##########
+
+dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(collinearity, table_file)
+cat("Saved:", table_file, "\n")
+
 # Sized for the 20 pt projector theme (~1 in per field).
 n_fields <- length(field_order)
-save_plot(output_file, heatmap, width = 4 + n_fields, height = 3 + n_fields)
-cat("Saved:", output_file, "\n")
+save_plot(heatmap_file, heatmap, width = 4 + n_fields, height = 3 + n_fields)
+cat("Saved:", heatmap_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== QC: Field Collinearity Matrix Complete ===\n")
 sink(type = "message")

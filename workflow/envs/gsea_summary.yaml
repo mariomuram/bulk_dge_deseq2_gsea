@@ -1,6 +1,47 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: FSFAP
+
+
+#########
+# About #
+#########
+
+# File:     workflow/envs/gsea_summary.yaml
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-09-01
+# Modified: 2026-10-15
+# License:  GNU All-Permissive License
+# Purpose:  GSEA summary environment YAML file for the bulk RNA-seq DGE
+#           (DESeq2 + GSEA) Snakemake workflow.
+
+
+###########
+# License #
+###########
+
+# GSEA summary conda environment YAML file for bulk RNA-seq DGE (DESeq2 +
+# GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.  This file is offered as-is,
+# without any warranty.
+
+
+############
+# Channels #
+############
+
 channels:
   - conda-forge
   - nodefaults
+
+
+############
+# Packages #
+############
+
 dependencies:
   - r-base
   - r-readr

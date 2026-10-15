@@ -1,12 +1,75 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/lib/plot_theme.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-09-19
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Plot theme helper R script for the bulk RNA-seq DGE (DESeq2 +
+#           GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
+# Shared plot theme helpers to unifiy plot styling in a central place.
+
+
+###########
+# License #
+###########
+
+# Plot theme helper R script for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+###########
+# Imports #
+###########
+
 library(ggplot2)
+
+
+#############
+# Constants #
+#############
 
 base_size <- 20
 default_text_size <- (base_size * 0.75) / .pt
 default_point_size <- 4
 default_line_width <- 1.2
 
+
+#############
+# Functions #
+#############
+
+# TODO: Parameterize / default to constants!
 # Global theme for projector presentations
-theme_projector <- function(base_size = 20, base_family = "sans") {
+theme_projector <- function(base_size = base_size, base_family = "sans") {
   theme_minimal(
     base_size = base_size,
     base_family = base_family,
@@ -41,6 +104,10 @@ save_plot <- function(filename, plot, width = 8, height = 6, ...) {
   )
 }
 
+
+#########
+# Setup #
+#########
 
 # Set global theme
 theme_set(theme_projector(base_size))

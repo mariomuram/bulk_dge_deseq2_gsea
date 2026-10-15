@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/merge_counts.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-03
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Count matrix merging R script for the bulk RNA-seq DGE (DESeq2
+#           + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # Merge counts: read the count matrices of all configured files into one
 # gene x sample matrix, build the sample sheet (coldata) from the labels
 # parsed in the Snakefile, and drop low-count genes.
@@ -16,7 +38,42 @@
 #              applied here; deseq2_fit.R relevels from the Snakefile-supplied
 #              `reference_levels` param, never from the stored file.
 
+
+###########
+# License #
+###########
+
+# Count matrix merging R script for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(readr)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -27,10 +84,27 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== Merge Counts ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
-# --- Read and merge count matrices (from multiple files) ---------------
+
+##############
+# Parameters #
+##############
 
 count_files <- snakemake@input[["count_files"]]  # vector of file paths
 file_to_samples <- snakemake@params[["file_to_samples"]]  # file path -> samples mapping
+samples_info <- snakemake@params[["samples_info"]]    # sample -> label
+sample_fields <- snakemake@params[["sample_fields"]]   # sample -> list
+condition_field_names <- unlist(snakemake@params[["condition_fields"]])
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+counts_file <- snakemake@output[["counts"]]
+coldata_file <- snakemake@output[["coldata"]]
+
+
+#########
+# Input #
+#########
+
+# Read and merge count matrices (from multiple files).
+
 
 if (length(count_files) == 1L) {
   cat("Reading count matrix...\n")
@@ -169,6 +243,11 @@ for (file_path in count_files) {
   file_to_counts[[file_key]] <- df[, file_samples, drop = FALSE]
 }
 
+
+###########
+# Merging #
+###########
+
 gene_ids <- seen_genes
 
 # Merge all count matrices side-by-side
@@ -186,10 +265,12 @@ cat("\nMerged dimensions:", nrow(counts_matrix), "genes x",
     ncol(counts_matrix), "samples (total across all files)\n")
 
 
-# --- Build sample metadata (fields parsed in the Snakefile) --------
 
-samples_info <- snakemake@params[["samples_info"]]    # sample -> label
-sample_fields <- snakemake@params[["sample_fields"]]   # sample -> list
+############
+# Metadata #
+############
+
+# Build sample metadata (fields parsed in the Snakefile).
 
 missing_samples <- setdiff(names(samples_info), colnames(counts_matrix))
 if (length(missing_samples) > 0) {
@@ -208,8 +289,6 @@ counts_matrix <- counts_matrix[, names(samples_info), drop = FALSE]
 field_names <- names(sample_fields[[1]])
 cat("Parsed sample fields:", paste(field_names, collapse = ", "), "\n")
 
-condition_field_names <- unlist(snakemake@params[["condition_fields"]])
-confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
 cat("Condition fields (crossed):", paste(condition_field_names,
                                          collapse = ", "), "\n")
 if (length(confounder_field_names) > 0) {
@@ -264,17 +343,25 @@ if (any(n_per_condition < 2)) {
   )
 }
 
-# --- Round, pre-filter and write -------------------------------------
+
+###################
+# Counts rounding #
+###################
+
 # DESeq2 needs integer counts, so fractional (e.g. RSEM expected) counts are
 # rounded; the filter then runs on the rounded values, exactly as it did when
 # it lived in deseq2_fit.R.
-
 if (anyNA(counts_matrix)) {
   stop("ERROR: the merged count matrix contains NA value(s).")
 }
 counts_matrix <- round(counts_matrix)
 
-# Pre-filtering: remove genes with very low counts
+
+#################
+# Pre-filtering #
+#################
+
+# Remove genes with very low counts.
 cat("\nPre-filtering low-count genes (rowSums >= 10)...\n")
 keep <- rowSums(counts_matrix) >= 10
 cat("Genes removed:", sum(!keep), "\n")
@@ -284,6 +371,11 @@ if (nrow(counts_matrix) == 0L) {
   stop("ERROR: no gene passed the low-count pre-filter.")
 }
 
+
+##########
+# Output #
+##########
+
 # Stored as integers: readr would otherwise write large doubles in scientific
 # notation (e.g. 1e+05).
 if (max(counts_matrix) > .Machine$integer.max) {
@@ -291,8 +383,8 @@ if (max(counts_matrix) > .Machine$integer.max) {
 }
 storage.mode(counts_matrix) <- "integer"
 
+
 # write_tsv() gzip-compresses on its own, going by the .gz file extension.
-counts_file <- snakemake@output[["counts"]]
 dir.create(dirname(counts_file), showWarnings = FALSE, recursive = TRUE)
 write_tsv(
   data.frame(gene_id = rownames(counts_matrix), counts_matrix,
@@ -302,10 +394,14 @@ write_tsv(
 )
 cat("\nSaved counts:", counts_file, "\n")
 
-coldata_file <- snakemake@output[["coldata"]]
 dir.create(dirname(coldata_file), showWarnings = FALSE, recursive = TRUE)
 write_tsv(coldata, coldata_file)
 cat("Saved coldata:", coldata_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== Merge Counts Complete ===\n")
 sink(type = "message")

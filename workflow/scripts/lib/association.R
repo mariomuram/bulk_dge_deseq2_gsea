@@ -1,3 +1,24 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/lib/association.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-01
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Sample annotation field association helpers R script for the
+#           bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # Shared helpers for the PC-field association matrix and the field x field
 # collinearity matrix. Both run smartcor::smart_cormat() with its defaults, so
 # method selection is smartcor's own (see ?smart_cor for the type-pair table).
@@ -15,8 +36,45 @@
 
 # FIELD_TYPES (Snakefile) use smartcor's vocabulary, plus two types of our own
 # that carry no diagnostic value and are dropped before smartcor is called.
+
+
+###########
+# License #
+###########
+
+# Sample annotation field association helpers R script for bulk RNA-seq DGE
+# (DESeq2 + GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+#############
+# Constants #
+#############
+
 SMARTCOR_FIELD_TYPES <- c("binary", "categorical", "ordinal", "continuous")
 EXCLUDED_FIELD_TYPES <- c("constant", "identifier")
+
+
+#############
+# Functions #
+#############
+
 
 # Fields that participate in diagnostics: exactly those in `field_types`
 # (Snakefile FIELD_TYPES), minus constant/identifier. Returns a named

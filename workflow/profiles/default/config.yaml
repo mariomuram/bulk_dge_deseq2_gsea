@@ -1,1 +1,46 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: FSFAP
+
+
+#########
+# About #
+#########
+
+# File:     workflow/profiles/default/config.yaml
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-08-25
+# Modified: 2026-08-25
+# License:  GNU All-Permissive License
+# Purpose:  Default workflow Snakemake profile for the bulk RNA-seq DGE
+#           (DESeq2 + GSEA) Snakemake workflow.
+
+
+###########
+# License #
+###########
+
+# Default workflow Snakemake profile for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# Copying and distribution of this file, with or without modification,
+# are permitted in any medium without royalty provided the copyright
+# notice and this notice are preserved.  This file is offered as-is,
+# without any warranty.
+
+
+###########
+# Options #
+###########
+
+# The workflow specifies its dependencies as Conda environments (see
+# `workflow/envs`) and the README recommends installing Snakemake itself
+# via Conda.
+# Thus, enabling Conda integration by default increases reproducibility.
+# Note: The main Snakefile (`workflow/Snakefile`) defines the minimum Snakemake
+# version supported by the workflow as >= v. 8.0.0.
+# Thus, according to
+# https://snakemake.readthedocs.io/en/stable/getting_started/migration.html#migrating-to-snakemake-8,
+# `--use-conda` should be considered deprecated and `--sdm=conda` can be used
+# instead.
 software-deployment-method: conda

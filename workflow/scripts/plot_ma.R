@@ -1,10 +1,66 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/plot_ma.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-09-21
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  MA plot R script for the bulk RNA-seq DGE (DESeq2 + GSEA)
+#           Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # Plot: MA plot for a single contrast, unshrunk or shrunk LFC.
+
+
+###########
+# License #
+###########
+
+# MA plot R script for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
 
 library(ggplot2)
 library(dplyr)
 library(readr)
 library(ggrepel)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -14,11 +70,29 @@ sink(logfile, type = "message", append = TRUE)
 
 cat("=== Plot: MA Plot ===\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["plot_input_lib"]])
 source(snakemake@input[["plot_title_lib"]])
+
+
+##############
+# Parameters #
+##############
+
 confounder_handling <- snakemake@wildcards[["confounder_handling"]]
+output_file <- snakemake@output[["ma"]]
+
 cat("Confounder handling:", confounder_handling, "\n")
+
+
+#########
+# Input #
+#########
 
 n_na <- sum(is.na(results_df$padj))
 if (n_na > 0) {
@@ -29,6 +103,11 @@ if (n_na > 0) {
     "filtering funnel stays visible on the plot.\n"
   )
 }
+
+
+###########
+# MA plot #
+###########
 
 lfc_max <- max(abs(results_df$lfc_value), na.rm = TRUE)
 ma_plot <- ggplot(
@@ -56,10 +135,19 @@ ma_plot <- ggplot(
     color = paste0("padj < ", padj_threshold)
   )
 
-output_file <- snakemake@output[["ma"]]
+
+##########
+# Output #
+##########
+
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
 save_plot(output_file, ma_plot)
 cat("Saved:", output_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== Plot: MA Plot Complete ===\n")
 sink(type = "message")

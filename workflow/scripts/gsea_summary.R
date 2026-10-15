@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/gsea_summary.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-09-01
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  GSEA summary R script for the bulk RNA-seq DGE (DESeq2 + GSEA)
+#           Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # Cross-group GSEA summary. Used by two rules, each fixing one dimension and
 # comparing across the other ("group" is whatever `grouping_var` names):
 #   - aggregate_gsea: one run per (gsea, confounder_handling);
@@ -20,14 +42,84 @@
 #   - a heatmap of that matrix (capped for legibility)
 #   - a pairwise Jaccard-overlap table of each group pair's
 #     significant-pathway sets (unrestricted by the heatmap cap)
+
+
+###########
+# License #
+###########
+
+# GSEA summary R script for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(readr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 
-# =====================================================================
-# Functions
-# =====================================================================
+
+###########
+# Logging #
+###########
+
+logfile <- snakemake@log[[1]]
+dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
+logfile <- file(logfile, open = "w")
+sink(logfile, type = "output")
+sink(logfile, type = "message", append = TRUE)
+
+cat("=== GSEA cross-group summary ===\n")
+cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
+
+
+###############
+# Shared code #
+###############
+
+source(snakemake@input[["plot_theme_lib"]])
+source(snakemake@input[["heatmap_theme_lib"]])
+source(snakemake@input[["plot_title_lib"]])
+
+
+#############
+# Functions #
+#############
+
+require_param <- function(name) {
+  v <- snakemake@params[[name]]
+  if (is.null(v)) {
+    stop("ERROR: required param '", name, "' missing from the rule.")
+  }
+  v
+}
+get_input <- function(name) {
+  v <- snakemake@input[[name]]
+  if (is.null(v)) {
+    stop("ERROR: required input '", name, "' missing from the rule.")
+  }
+  v
+}
 
 # Read every group's table, validate columns, row-bind with a column named
 # by the VALUE of grouping_var holding each table's group label.
@@ -130,7 +222,9 @@ build_summary_table <- function(display_df, id_description, group_names,
   }
 }
 
-# --- Ranking heuristics ----------------------------------------------
+
+# Ranking heuristics:
+
 # All rank_by_* share one signature (display_df, sig_sets, group_names) so
 # rank_pathways() can dispatch uniformly; each returns a tibble with `id`
 # plus its metric columns, already in rank order.
@@ -222,6 +316,7 @@ select_heatmap_pathways <- function(pathway_rank, union_sig_ids,
   pathway_rank %>% filter(id %in% chosen)
 }
 
+
 # Layout for the GSEA heatmap. Row pitch shrinks with row count (0.28 in up
 # to 30 rows, floored at 0.2 in); y-label size follows the pitch (capped at
 # the theme's base size); width grows with the longest pathway label.
@@ -310,37 +405,10 @@ compute_pairwise_jaccard <- function(sig_sets, group_names, grouping_var) {
   out
 }
 
-# =====================================================================
-# Main
-# =====================================================================
 
-logfile <- snakemake@log[[1]]
-dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
-logfile <- file(logfile, open = "w")
-sink(logfile, type = "output")
-sink(logfile, type = "message", append = TRUE)
-
-cat("=== GSEA cross-group summary ===\n")
-cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
-
-require_param <- function(name) {
-  v <- snakemake@params[[name]]
-  if (is.null(v)) {
-    stop("ERROR: required param '", name, "' missing from the rule.")
-  }
-  v
-}
-get_input <- function(name) {
-  v <- snakemake@input[[name]]
-  if (is.null(v)) {
-    stop("ERROR: required input '", name, "' missing from the rule.")
-  }
-  v
-}
-
-source(get_input("plot_theme_lib"))
-source(get_input("heatmap_theme_lib"))
-source(get_input("plot_title_lib"))
+##############
+# Parameters #
+##############
 
 gsea_name <- require_param("gsea_name")
 grouping_var <- require_param("grouping_var")
@@ -360,6 +428,9 @@ confounder_handling <- snakemake@wildcards[["confounder_handling"]]
 # NULL unless the rule fixes a single contrast (aggregate_gsea_by_strategy
 # sets it; the base aggregate_gsea rule does not).
 contrast_name <- snakemake@params[["contrast_name"]]
+summary_table_file <- snakemake@output[["summary_table"]]
+heatmap_file <- snakemake@output[["heatmap"]]
+jaccard_file <- snakemake@output[["jaccard"]]
 
 rank_fns <- list(breadth = rank_by_breadth, divergence = rank_by_divergence)
 if (!rank_heuristic %in% names(rank_fns)) {
@@ -387,6 +458,11 @@ cat(
 # rule). Looked up by
 # name so the lib-file inputs never enter the picture.
 input_paths <- unlist(get_input("gsea_tables"), use.names = FALSE)
+
+
+#########
+# Input #
+#########
 
 cat("Loading per-group tables...\n")
 long_df <- load_group_tables(input_paths, group_names, grouping_var)
@@ -420,7 +496,10 @@ if (grp$n_multi_desc > 0) {
   )
 }
 
-# --- Wide summary table -------------------------------------------------
+
+######################
+# Wide summary table #
+######################
 
 cat("\nBuilding wide summary table...\n")
 summary_df <- build_summary_table(
@@ -438,13 +517,11 @@ if (nrow(display_df) > 0) {
     "padj <", padj_threshold, ".\n"
   )
 }
-cat("\nSaving summary table...\n")
-summary_table_file <- snakemake@output[["summary_table"]]
-dir.create(dirname(summary_table_file), showWarnings = FALSE, recursive = TRUE)
-write_tsv(summary_df, summary_table_file)
-cat("Saved:", summary_table_file, "\n")
 
-# --- Heatmap (capped for legibility) -----------------------------------
+
+###################################
+# Heatmap (capped for legibility) #
+###################################
 
 cat("\nGenerating summary heatmap...\n")
 if (nrow(display_df) > 0) {
@@ -456,44 +533,58 @@ if (nrow(display_df) > 0) {
     pathway_rank, union_sig_ids, gene_sets_of_interest, heatmap_top_n,
     gsea_name
   )
-  layout <- gsea_heatmap_layout(selected_pathways, group_names)
+  heatmap_layout <- gsea_heatmap_layout(selected_pathways, group_names)
   heatmap_plot <- plot_gsea_heatmap(
-    display_df, id_description, selected_pathways, group_names,
-    grouping_var, padj_threshold, color_up, color_down, color_none,
-    color_na, gsea_name, layout, confounder_handling, contrast_name
+    display_df, id_description, selected_pathways, group_names, grouping_var,
+    padj_threshold, color_up, color_down, color_none, color_na, gsea_name,
+    heatmap_layout, confounder_handling, contrast_name
   )
-  # save_plot(filename, plot, width, height, ...): `...` -> ggsave
-  save_plot(
-    snakemake@output[["heatmap"]], heatmap_plot,
-    width = layout$width, height = layout$height, limitsize = FALSE
-  )
-  cat("Heatmap saved:", snakemake@output[["heatmap"]], "\n")
 } else {
   cat("No pathways to plot.\n")
-  empty_heatmap <- ggplot() +
+  heatmap_plot <- ggplot() +
     annotate(
       "text", x = 0.5, y = 0.5,
       label = paste0("No significant pathways found in any ", grouping_var),
       size = 5, color = "gray50"
     ) +
     theme_void()
-  ggsave(
-    snakemake@output[["heatmap"]], empty_heatmap,
-    width = 8, height = 6, dpi = 300
-  )
+  heatmap_layout <- c("with" = 8, "height" = 6)
 }
 
-# --- Pairwise Jaccard overlap of significant-pathway sets --------------
+
+########################################################
+# Pairwise Jaccard overlap of significant-pathway sets #
+########################################################
 
 cat("\nComputing pairwise Jaccard overlap...\n")
 jaccard_df <- compute_pairwise_jaccard(sig_sets, group_names, grouping_var)
 cat("Pairwise Jaccard summary (on significant-pathway sets):\n")
 print(jaccard_df)
+
+
+##########
+# Output #
+##########
+
+cat("\nSaving summary table...\n")
+dir.create(dirname(summary_table_file), showWarnings = FALSE, recursive = TRUE)
+write_tsv(summary_df, summary_table_file)
+cat("Saved:", summary_table_file, "\n")
+
+cat("\nSaving heatmap...\n")
+save_plot(heatmap_file, heatmap_plot, width = heatmap_layout$width,
+          height = heatmap_layout$height, limitsize = FALSE)
+cat("Saved:", heatmap_file, "\n")
+
 cat("\nSaving Jaccard table...\n")
-jaccard_file <- snakemake@output[["jaccard"]]
 dir.create(dirname(jaccard_file), showWarnings = FALSE, recursive = TRUE)
 write_tsv(jaccard_df, jaccard_file)
 cat("Saved:", jaccard_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== GSEA cross-group summary complete ===\n")
 sink(type = "message")

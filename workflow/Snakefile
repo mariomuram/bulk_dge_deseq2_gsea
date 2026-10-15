@@ -1,3 +1,63 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/Snakefile
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-08-24
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Main Snakefile for the bulk RNA-seq DGE (DESeq2 + GSEA)
+#           Snakemake workflow.
+
+
+###########
+# License #
+###########
+
+# Main Snakefile for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+#############################
+# Minimum Snakemake version #
+#############################
+
+# Enable setting a minimum Snakemake version supported by the workflow.
+from snakemake.utils import min_version
+
+# This workflow specifies the use of conda via the `software-deployment-method`
+# parameter that was introduced in Snakemake 8.
+# It was tested with version 9.27.0 but a search through the changelog for
+# features added in-between did not reveal anything that should affect this
+# workflow.
+min_version("8.0.0")
+
+
+###########
+# Imports #
+###########
+
 conda: "envs/base.yaml"
 
 import parse
@@ -7,8 +67,15 @@ import itertools
 import string
 import warnings
 
+
+#################
+# Configuration #
+#################
+
 # Load configuration
 configfile: "config/config.yaml"
+
+# TODO: Separate into separate `rules/*.smk` file(s)!
 
 OUTPUT_DIR = config["output_dir"]
 DESIGN = config["design"]
@@ -429,15 +496,6 @@ OTHER_GSEA_NAMES = [
 HEATMAP_TOP_N = config["gsea_summary"]["heatmap_top_n"]
 
 
-wildcard_constraints:
-  contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
-  reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
-  correction = "|".join(ACTIVE_CORRECTION_METHODS_QC),
-  confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
-  lfc_type = "unshrunk|shrunk",
-  gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
-
-
 # Only aggregate GSEA results if there's more than one contrast
 _GSEA_SUMMARY_OUTPUT_SUFFIXES = {"summary.tsv.gz", "summary_heatmap.pdf",
                                  "jaccard.tsv.gz"}
@@ -459,6 +517,26 @@ if len(ACTIVE_CONFOUNDER_HANDLING_METHODS) > 1:
     contrast=CONTRAST_NAMES, gsea=GSEA_NAMES,
     suffix=_GSEA_SUMMARY_OUTPUT_SUFFIXES,
   )
+
+
+########################
+# Wildcard constraints #
+########################
+
+wildcard_constraints:
+  contrast = "|".join(re.escape(c) for c in CONTRAST_NAMES),
+  reference_factor = "|".join(re.escape(r) for r in REFERENCE_FACTORS),
+  correction = "|".join(ACTIVE_CORRECTION_METHODS_QC),
+  confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
+  lfc_type = "unshrunk|shrunk",
+  gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
+
+
+#########
+# Rules #
+#########
+
+# TODO: Separate into separate `rules/*.smk` file(s)!
 
 rule all:
   input:
@@ -749,7 +827,7 @@ rule gsea_run_go:
     ranking_lib = workflow.source_path("scripts/lib/gsea_ranking.R"),
     # ^-- explicitly re-run upon code change
   output:
-    gsea_result_rds =
+    gsea_results_rds =
       f"{OUTPUT_DIR}/gsea/{{contrast}}.{{confounder_handling}}.{{gsea}}_gsea_result.rds"
   params:
     contrast_name = "{contrast}",
@@ -770,7 +848,7 @@ rule gsea_run_hallmark:
     results = rules.gsea_run_go.input.results,
     ranking_lib = rules.gsea_run_go.input.ranking_lib,
     # ^-- explicitly re-run upon code change
-  output: gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds
+  output: gsea_results_rds = rules.gsea_run_go.output.gsea_results_rds
   params:
     contrast_name = rules.gsea_run_go.params.contrast_name,
     gsea_name = rules.gsea_run_go.params.gsea_name,
@@ -793,7 +871,7 @@ def _gene_sets_of_interest_for_gsea(wildcards):
 rule gsea_postprocess_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
   input:
-    gsea_result_rds = rules.gsea_run_go.output.gsea_result_rds,
+    gsea_results_rds = rules.gsea_run_go.output.gsea_results_rds,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
     plot_title_lib = rules.plot_volcano.input.plot_title_lib,

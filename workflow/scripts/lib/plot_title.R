@@ -1,6 +1,59 @@
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/lib/plot_title.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-03
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Plot title helper R script for the bulk RNA-seq DGE (DESeq2 +
+#           GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
+# Shared plot title helpers to unifiy plot labeling in a central place.
+
 # Plot titles that say how confounders were handled in the analysis behind
 # the plot, and (for LFC plots) whether the LFCs are shrunk.
+
+
+###########
+# License #
+###########
+
+# Plot title helper R script for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# Copyright (C) 2026  Marcel Schilling
 #
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+#############
+# Functions #
+#############
+
 # `confounder_handling` is the value of the Snakefile's `{confounder_handling}`
 # wildcard, i.e. snakemake@wildcards[["confounder_handling"]]:
 #   "no_confounders"        nothing to say; omitted from the title

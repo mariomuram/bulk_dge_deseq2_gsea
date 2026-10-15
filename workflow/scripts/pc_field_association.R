@@ -1,4 +1,27 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/pc_field_association.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-01
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  Transcriptome PC vs. sample metadata field association checking
+#           R script for the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+#           workflow.
+
+
+###############
+# Description #
+###############
+
 # QC: PC-field association matrix, for one correction stage.
 #
 # One cell = one PC vs. one field, tested univariately via smartcor (method
@@ -10,11 +33,46 @@
 # Asterisks mark raw p < 0.05 (no multiple-testing correction). A colored
 # strip along the field axis shows each field's role in the design.
 
+
+###########
+# License #
+###########
+
+# Transcriptome PC vs. sample metadata field association checking R script
+# for bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(DESeq2)
 library(ggplot2)
 library(patchwork)
 library(smartcor)
 library(readr)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -25,15 +83,25 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== QC: PC-Field Association Matrix ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["association_lib"]])
 source(snakemake@input[["heatmap_theme_lib"]])
 
-correction <- snakemake@wildcards[["correction"]]
-condition_field_names <- unlist(snakemake@params[["condition_fields"]])
-confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+#############
+# Constants #
+#############
+
 n_pcs_max <- 10  # PCs shown; the rest explain little and clutter the heatmap
-cat("Correction stage:", correction, "\n")
+
+
+#############
+# Functions #
+#############
 
 # One smart_cormat() call over [PC scores | fields]; only the PC-vs-field pairs
 # are kept (the PC-PC and field-field pairs are not needed here).
@@ -115,14 +183,40 @@ plot_pc_field_association <- function(assoc, var_explained, roles) {
                 heights = c(length(field_order), 2), guides = "collect")
 }
 
-dds <- readRDS(snakemake@input[["dds_rds"]])
-coldata <- as.data.frame(colData(dds))
-pca <- readRDS(snakemake@input[["pca_scores"]])
 
-field_types <- diagnostic_field_types(coldata, snakemake@params[["field_types"]])
+##############
+# Parameters #
+##############
+
+dds <- snakemake@input[["dds_rds"]]
+pca <- snakemake@input[["pca_scores"]]
+field_types <- snakemake@params[["field_types"]]
+correction <- snakemake@wildcards[["correction"]]
+condition_field_names <- unlist(snakemake@params[["condition_fields"]])
+confounder_field_names <- unlist(snakemake@params[["confounder_fields"]])
+table_file <- snakemake@output[["table"]]
+heatmap_file <- snakemake@output[["heatmap"]]
+
+cat("Correction stage:", correction, "\n")
+
+
+#########
+# Input #
+#########
+
+dds <- readRDS(dds)
+coldata <- as.data.frame(colData(dds))
+pca <- readRDS(pca)
+n_pcs <- min(n_pcs_max, ncol(pca$x))
+
+field_types <- diagnostic_field_types(coldata, field_types)
 cat("Fields tested:", paste(names(field_types), collapse = ", "), "\n")
 
-n_pcs <- min(n_pcs_max, ncol(pca$x))
+
+################
+# Associations #
+################
+
 scores <- pca$x[, seq_len(n_pcs), drop = FALSE]
 stopifnot(setequal(rownames(scores), rownames(coldata)))
 coldata <- coldata[rownames(scores), , drop = FALSE]
@@ -142,24 +236,37 @@ if (n_valid == 0) {
   )
 }
 
+
+###########
+# Heatmap #
+###########
+
 roles <- ifelse(names(field_types) %in% condition_field_names, "condition",
          ifelse(names(field_types) %in% confounder_field_names, "confounder",
                 "unused"))
 names(roles) <- names(field_types)
 
-table_file <- snakemake@output[["table"]]
+heatmap <- plot_pc_field_association(assoc, var_explained, roles)
+
+
+##########
+# Output #
+##########
+
 dir.create(dirname(table_file), showWarnings = FALSE, recursive = TRUE)
 write_tsv(assoc, table_file)
 cat("Saved:", table_file, "\n")
 
-output_file <- snakemake@output[["heatmap"]]
 # Sized for the 20 pt projector theme: ~1 in per PC column, ~0.6 in per field
 # row, plus room for the field labels, legends and the % variance strip.
-save_plot(
-  output_file, plot_pc_field_association(assoc, var_explained, roles),
-  width = 5 + n_pcs, height = 3 + 0.6 * length(field_types)
-)
-cat("Saved:", output_file, "\n")
+save_plot(heatmap_file, heatmap, width = 5 + n_pcs,
+          height = 3 + 0.6 * length(field_types))
+cat("Saved:", heatmap_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== QC: PC-Field Association Matrix Complete ===\n")
 sink(type = "message")

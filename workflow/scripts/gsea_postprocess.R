@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/gsea_postprocess.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-09-01
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  GSEA post-processing R script for the bulk RNA-seq DGE (DESeq2
+#           + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # Post-processes a live gseaResult object (produced by
 # gsea_run_go.R or gsea_run_hallmark.R). The run scripts now use
 # pvalueCutoff = 1, so this script -- not the enrichment call --
@@ -11,7 +33,35 @@
 # Shared across both databases -- collateral reruns here are
 # cheap, so this stays one script with a database branch.
 
-GENE_SETS_OF_INTEREST_FALLBACK_N <- 15L
+
+###########
+# License #
+###########
+
+# GSEA post-processing R script for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
 
 library(readr)
 library(dplyr)
@@ -19,6 +69,11 @@ library(ggplot2)
 library(clusterProfiler)
 library(enrichplot)
 library(forcats)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -29,32 +84,27 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== GSEA postprocess ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["plot_theme_lib"]])
 source(snakemake@input[["plot_title_lib"]])
-contrast_name <- snakemake@params[["contrast_name"]]
-gsea_name <- snakemake@params[["gsea_name"]]
-database <- snakemake@params[["database"]]
-padj_threshold <- snakemake@params[["padj_threshold"]]
-gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
-color_down <- snakemake@params[["color_down"]]
-color_none <- snakemake@params[["color_none"]]
-color_up <- snakemake@params[["color_up"]]
-lollipop_size <- snakemake@params[["lollipop_size"]]
-confounder_handling <- snakemake@wildcards[["confounder_handling"]]
 
-cat("Contrast:", contrast_name, "\n")
-cat("Confounder handling:", confounder_handling, "\n")
-cat("Analysis name:", gsea_name, "\n")
-cat("Database:", database, "\n\n")
 
-# --- Load the enrichment result --------------------------------------
-gsea_result <- readRDS(snakemake@input[["gsea_result_rds"]])
-cat(
-  "Loaded gseaResult:", nrow(as.data.frame(gsea_result)),
-  "gene set(s) tested (all, unfiltered by significance)\n"
-)
+#############
+# Constants #
+#############
 
-# --- Helper: gseaResult -> tidy data frame ----------------------------
+GENE_SETS_OF_INTEREST_FALLBACK_N <- 15L
+
+
+#############
+# Functions #
+#############
+
+# Helper: gseaResult -> tidy data frame
 tidy_gsea <- function(x) {
   raw <- as.data.frame(x)
   if (nrow(raw) == 0) {
@@ -74,7 +124,54 @@ tidy_gsea <- function(x) {
     arrange(padj)
 }
 
-# --- Save the "all tested gene sets" table -----------------------------
+
+##############
+# Parameters #
+##############
+
+contrast_name <- snakemake@params[["contrast_name"]]
+gsea_name <- snakemake@params[["gsea_name"]]
+database <- snakemake@params[["database"]]
+padj_threshold <- snakemake@params[["padj_threshold"]]
+gene_sets_of_interest <- snakemake@params[["gene_sets_of_interest"]]
+color_down <- snakemake@params[["color_down"]]
+color_none <- snakemake@params[["color_none"]]
+color_up <- snakemake@params[["color_up"]]
+lollipop_size <- snakemake@params[["lollipop_size"]]
+confounder_handling <- snakemake@wildcards[["confounder_handling"]]
+gsea_results <- snakemake@input[["gsea_results_rds"]]
+output_table_all <- snakemake@output[["gsea_table_all"]]
+output_table <- snakemake@output[["gsea_table_signif"]]
+output_table_simplified <- NULL
+if (database == "GO") {
+  output_table_simplified <- snakemake@output[["gsea_table_simplified"]]
+}
+output_driver_genes <- snakemake@output[["gsea_driver_genes"]]
+gsea_plot_file <- snakemake@output[["gsea_plot"]]
+ridge_plot_file <- snakemake@output[["gsea_ridge_plot"]]
+lollipop_plot_file <- snakemake@output[["gsea_lollipop_plot"]]
+
+cat("Contrast:", contrast_name, "\n")
+cat("Confounder handling:", confounder_handling, "\n")
+cat("Analysis name:", gsea_name, "\n")
+cat("Database:", database, "\n\n")
+
+
+#########
+# Input #
+#########
+
+# Load the enrichment results.
+gsea_results <- readRDS(gsea_results)
+cat(
+  "Loaded gseaResult:", nrow(as.data.frame(gsea_results)),
+  "gene set(s) tested (all, unfiltered by significance)\n"
+)
+
+
+##############################
+# All tested gene sets table #
+##############################
 
 # This is the canonical table for cross-contrast comparison
 # (scripts/gsea_summary.R). It is NOT restricted to this contrast's
@@ -83,7 +180,7 @@ tidy_gsea <- function(x) {
 # near-identical NES either way -- doesn't look like it's specific
 # to the former. That's exactly the artifact a per-contrast
 # pvalueCutoff would otherwise bake in.
-gsea_df_all <- tidy_gsea(gsea_result)
+gsea_df_all <- tidy_gsea(gsea_results)
 if (nrow(gsea_df_all) == 0) {
   cat(
     "WARNING: no gene sets were tested at all -- check",
@@ -95,24 +192,19 @@ if (nrow(gsea_df_all) == 0) {
 }
 cat("\nGene sets tested (all):", nrow(gsea_df_all), "\n")
 
-cat("\nSaving all-gene-sets GSEA table...\n")
-output_table_all <- snakemake@output[["gsea_table_all"]]
-dir.create(dirname(output_table_all), showWarnings = FALSE, recursive = TRUE)
-con <- gzfile(output_table_all, open = "wb", compression = 9)
-write_tsv(gsea_df_all, con)
-close(con)
-cat("Saved:", output_table_all, "\n")
 
-# --- Derive the significant-only table ---------------------------
+##########################
+# Significant-only table #
+##########################
 
 # gsea_run_*.R runs with pvalueCutoff = 1, so this contrast's own
 # significance call has to be applied explicitly here rather than
 # inherited from the enrichment call. filter() has a registered
 # method for gseaResult objects (returns a gseaResult, not a plain
 # data frame), so simplify()/ridgeplot() below still work on it.
-gsea_result_sig <- gsea_result %>%
+gsea_results_sig <- gsea_results %>%
   filter(p.adjust < padj_threshold)
-gsea_df <- tidy_gsea(gsea_result_sig)
+gsea_df <- tidy_gsea(gsea_results_sig)
 if (nrow(gsea_df) == 0) {
   cat(
     "WARNING: no significantly enriched pathways found",
@@ -125,15 +217,10 @@ if (nrow(gsea_df) == 0) {
 cat("\nPathways significant at padj <", padj_threshold, ":",
     nrow(gsea_df), "\n")
 
-cat("\nSaving significant-only GSEA table...\n")
-output_table <- snakemake@output[["gsea_table_signif"]]
-dir.create(dirname(output_table), showWarnings = FALSE, recursive = TRUE)
-con <- gzfile(output_table, open = "wb", compression = 9)
-write_tsv(gsea_df, con)
-close(con)
-cat("Saved:", output_table, "\n")
 
-# --- GO-only: redundancy reduction for human-facing table & plots -----
+################################################################
+# GO-only: redundancy reduction for human-facing table & plots #
+################################################################
 
 # GO:BP terms nest heavily (parent/child terms with highly
 # overlapping gene membership); simplify() collapses semantically
@@ -144,8 +231,7 @@ cat("Saved:", output_table, "\n")
 # and meaningless. This feeds the plots and the simplified table
 # only; gsea_table_all and gsea_table_signif above are unaffected.
 gsea_df_top_source <- gsea_df
-
-if (database == "GO") {
+if (!is.null(output_table_simplified)) {
   library(org.Hs.eg.db)
   library(GOSemSim)
 
@@ -161,38 +247,31 @@ if (database == "GO") {
       "\nSimplifying redundant GO terms (cutoff = 0.7, by =",
       "'p.adjust', select_fun = min)...\n"
     )
-    gsea_result_simplified <- simplify(
-      gsea_result_sig,
+    gsea_results_simplified <- simplify(
+      gsea_results_sig,
       cutoff = 0.7,
       by = "p.adjust",
       select_fun = min
     )
-    n_terms_after <- nrow(as.data.frame(gsea_result_simplified))
+    n_terms_after <- nrow(as.data.frame(gsea_results_simplified))
     cat(
       "GO terms:", n_terms_before, "before simplification,",
       n_terms_after, "after (", n_terms_before - n_terms_after,
       "collapsed into a more significant parent/child term).\n"
     )
-    simplified_df <- tidy_gsea(gsea_result_simplified)
+    simplified_df <- tidy_gsea(gsea_results_simplified)
   }
-
-  cat("\nSaving simplified GO table...\n")
-  output_table_simplified <- snakemake@output[["gsea_table_simplified"]]
-  dir.create(
-    dirname(output_table_simplified),
-    showWarnings = FALSE, recursive = TRUE
-  )
-  con <- gzfile(output_table_simplified, open = "wb", compression = 9)
-  write_tsv(simplified_df, con)
-  close(con)
-  cat("Saved:", output_table_simplified, "\n")
 
   gsea_df_top_source <- simplified_df
 } else {
   cat("\nNot GO -- no redundancy reduction, no simplified table.\n")
 }
 
-# --- Resolve and validate gene sets of interest ---------------------
+
+#########################
+# Gene sets of interest #
+#########################
+
 # Any configured ID not found is warned and omitted, and if that leaves
 # nothing, this contrast's job stops rather than silently rendering
 # an empty, misleadingly-labeled "no significant pathways" plot.
@@ -246,13 +325,18 @@ gsea_df_gene_sets_of_interest <- gsea_df_all %>%
 # straight onto gsea_df_gene_sets_of_interest rather than keeping a
 # second, parallel ID-filtered copy around. The join's left side is
 # already restricted to gene_sets_of_interest, so it also does the
-# filtering -- no separate filter() on gsea_result needed here.
+# filtering -- no separate filter() on gsea_results needed here.
 cat("\nBuilding driver-gene table...\n")
 gsea_df_gene_sets_of_interest <- gsea_df_gene_sets_of_interest %>%
   left_join(
-    as.data.frame(gsea_result) %>% transmute(id = ID, core_enrichment),
+    as.data.frame(gsea_results) %>% transmute(id = ID, core_enrichment),
     by = "id"
   )
+
+
+################
+# Driver genes #
+################
 
 core_enrichment_clean <- ifelse(
   is.na(gsea_df_gene_sets_of_interest$core_enrichment), "",
@@ -288,15 +372,11 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
 }
 cat("Driver-gene rows:", nrow(driver_genes_df), "\n")
 
-output_driver_genes <- snakemake@output[["gsea_driver_genes"]]
-dir.create(dirname(output_driver_genes), showWarnings = FALSE,
-           recursive = TRUE)
-con <- gzfile(output_driver_genes, open = "wb", compression = 9)
-write_tsv(driver_genes_df, con)
-close(con)
-cat("Saved:", output_driver_genes, "\n")
 
-# --- Plot pathways of interest ------------------------------------
+##############################
+# Gene sets of interest plot #
+##############################
+
 cat("\nGenerating GSEA plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
   gsea_plot <- ggplot(
@@ -318,45 +398,47 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
       x = "",
       fill = "NES"
     )
-  save_plot(snakemake@output[["gsea_plot"]], gsea_plot)
-  cat("Plot saved:", snakemake@output[["gsea_plot"]], "\n")
 } else {
   cat("No pathways to plot.\n")
-  empty_plot <- ggplot() +
+  gsea_plot <- ggplot() +
     annotate(
       "text", x = 0.5, y = 0.5,
       label = "No significant pathways found",
       size = 5, color = "gray50"
     ) +
     theme_void()
-  save_plot(snakemake@output[["gsea_plot"]], empty_plot)
 }
 
-# --- Ridge plot of pathways of interest -----------------------------
+
+##############
+# Ridge plot #
+##############
+
 cat("\nGenerating GSEA ridge plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
-  gsea_ridge <- ridgeplot(gsea_result, showCategory = gene_sets_of_interest) +
+  ridge_plot <- ridgeplot(gsea_results, showCategory = gene_sets_of_interest) +
     labs(title = paste(
       "GSEA Ridge Plot:", format_plot_title(contrast_name, confounder_handling)
     ))
-  save_plot(snakemake@output[["gsea_ridge_plot"]], gsea_ridge)
-  cat("Ridge plot saved:", snakemake@output[["gsea_ridge_plot"]], "\n")
 } else {
   cat("No pathways to plot (ridge).\n")
-  empty_ridge <- ggplot() +
+  ridge_plot <- ggplot() +
     annotate(
       "text", x = 0.5, y = 0.5,
       label = "No significant pathways found",
       size = 5, color = "gray50"
     ) +
     theme_void()
-  save_plot(snakemake@output[["gsea_ridge_plot"]], empty_ridge)
 }
 
-# --- Lollipop plot of pathways of interest ---------------------------
+
+#################
+# Lollipop plot #
+#################
+
 cat("\nGenerating GSEA lollipop plot...\n")
 if (nrow(gsea_df_gene_sets_of_interest) > 0) {
-  gsea_lollipop <- gsea_df_gene_sets_of_interest %>%
+  lollipop_plot <- gsea_df_gene_sets_of_interest %>%
     ggplot(aes(NES, fct_reorder(description, NES))) +
     geom_segment(aes(xend = 0, yend = description)) +
     geom_point(aes(color = -sign(NES) * log10(padj),
@@ -371,19 +453,70 @@ if (nrow(gsea_df_gene_sets_of_interest) > 0) {
     theme_minimal() +
     xlab("Normalized Enrichment Score") +
     ylab(NULL)
-  save_plot(snakemake@output[["gsea_lollipop_plot"]], gsea_lollipop)
-  cat("Lollipop plot saved:", snakemake@output[["gsea_lollipop_plot"]], "\n")
 } else {
   cat("No pathways to plot (lollipop).\n")
-  empty_lollipop <- ggplot() +
+  lollipop_plot <- ggplot() +
     annotate(
       "text", x = 0.5, y = 0.5,
       label = "No significant pathways found",
       size = 5, color = "gray50"
     ) +
     theme_void()
-  save_plot(snakemake@output[["gsea_lollipop_plot"]], empty_lollipop)
 }
+
+
+##########
+# Output #
+##########
+
+# TODO: Replace `gzfile` calls by implicit `readr::write_tsv` handling.
+
+cat("\nSaving all-gene-sets GSEA table...\n")
+dir.create(dirname(output_table_all), showWarnings = FALSE, recursive = TRUE)
+con <- gzfile(output_table_all, open = "wb", compression = 9)
+write_tsv(gsea_df_all, con)
+close(con)
+cat("Saved:", output_table_all, "\n")
+
+cat("\nSaving significant-only GSEA table...\n")
+dir.create(dirname(output_table), showWarnings = FALSE, recursive = TRUE)
+con <- gzfile(output_table, open = "wb", compression = 9)
+write_tsv(gsea_df, con)
+close(con)
+cat("Saved:", output_table, "\n")
+
+if (exists("simplified_df")) {
+  cat("\nSaving simplified GO table...\n")
+  dir.create(
+    dirname(output_table_simplified),
+    showWarnings = FALSE, recursive = TRUE
+  )
+  con <- gzfile(output_table_simplified, open = "wb", compression = 9)
+  write_tsv(simplified_df, con)
+  close(con)
+  cat("Saved:", output_table_simplified, "\n")
+}
+
+dir.create(dirname(output_driver_genes), showWarnings = FALSE,
+           recursive = TRUE)
+con <- gzfile(output_driver_genes, open = "wb", compression = 9)
+write_tsv(driver_genes_df, con)
+close(con)
+cat("Saved:", output_driver_genes, "\n")
+
+save_plot(gsea_plot_file, gsea_plot)
+cat("Plot saved:", gsea_plot_file, "\n")
+
+save_plot(ridge_plot_file, ridge_plot)
+cat("Ridge plot saved:", ridge_plot_file, "\n")
+
+save_plot(lollipop_plot_file, lollipop_plot)
+cat("Lollipop plot saved:", lollipop_plot_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== GSEA postprocess complete ===\n")
 sink(type = "message")

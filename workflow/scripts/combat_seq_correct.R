@@ -1,4 +1,26 @@
 #!/usr/bin/env Rscript
+
+# SPDX-FileCopyrightText: © 2026 Marcel Schilling <mschilling@idibell.cat>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+
+#########
+# About #
+#########
+
+# File:     workflow/scripts/combat_seq_correct.R
+# Author:   Marcel Schilling <mschilling@idibell.cat>
+# Created:  2026-10-04
+# Modified: 2026-10-15
+# License:  GNU Affero General Public License version 3 or later
+# Purpose:  ComBat-seq correction R script for the bulk RNA-seq DGE (DESeq2
+#           + GSEA) Snakemake workflow.
+
+
+###############
+# Description #
+###############
+
 # ComBat-Seq correction of the merged count matrix: removes the effect of the
 # configured confounders from the counts themselves, BEFORE the DESeq2 fit.
 # (The alternative -- modelling them in the DESeq2 design -- is the
@@ -34,8 +56,43 @@
 # Output: same genes and samples, in the same order, as the input (later
 # steps compare column names with the DESeq2 objects), as integers.
 
+
+###########
+# License #
+###########
+
+# ComBat-seq correction R script for bulk RNA-seq DGE (DESeq2 + GSEA)
+# Snakemake workflow.
+# Copyright (C) 2026  Marcel Schilling
+#
+# This file is part of the bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake
+# workflow.
+# The bulk RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow is free software:
+# you can redistribute it and/or modify it under the terms of the GNU
+# Affero General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+###########
+# Imports #
+###########
+
 library(readr)
 library(sva)
+
+
+###########
+# Logging #
+###########
 
 logfile <- snakemake@log[[1]]
 dir.create(dirname(logfile), showWarnings = FALSE, recursive = TRUE)
@@ -46,14 +103,25 @@ sink(logfile, type = "message", append = TRUE)
 cat("=== ComBat-Seq Correction ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
+
+###############
+# Shared code #
+###############
+
 source(snakemake@input[["confounders_lib"]])
+
+
+#############
+# Constants #
+#############
 
 # Batches (and composite cells) with fewer samples than this are flagged.
 MIN_BATCH_SIZE <- 3L
 
-# =====================================================================
-# Functions
-# =====================================================================
+
+#############
+# Functions #
+#############
 
 # Integer count matrix (genes x samples) from a TSV as written by
 # merge_counts.R: first column `gene_id`, then one column per sample.
@@ -268,9 +336,10 @@ apply_combat_seq <- function(counts, coldata, confounder_fields,
   )
 }
 
-# =====================================================================
-# Main
-# =====================================================================
+
+##############
+# Parameters #
+##############
 
 counts_file <- snakemake@input[["counts"]]
 coldata_file <- snakemake@input[["coldata"]]
@@ -279,6 +348,11 @@ confounder_field_types <- snakemake@params[["confounder_field_types"]]
 discrete_confounder_fields <-
   unlist(snakemake@params[["discrete_confounder_fields"]])
 strategy <- snakemake@params[["multi_confounder_strategy"]]
+
+
+#########
+# Input #
+#########
 
 cat("Reading merged counts:", counts_file, "\n")
 counts <- read_count_matrix(counts_file)
@@ -297,6 +371,11 @@ if (!identical(colnames(counts), coldata$sample)) {
 }
 stopifnot(all(confounder_fields %in% colnames(coldata)))
 stopifnot("condition" %in% colnames(coldata))
+
+
+#########################
+# ComBat-seq correction #
+#########################
 
 corrected <- apply_combat_seq(
   counts, coldata, confounder_fields, confounder_field_types,
@@ -319,6 +398,12 @@ cat("Genes with rowSums < 10 after correction:",
     sum(rowSums(corrected) < 10),
     "(kept, so that all analyses use the same genes)\n")
 
+
+##########
+# Output #
+##########
+
+# TODO: Replace custom write_tsv by `readr::write_tsv`.
 # write_tsv() gzip-compresses on its own, going by the .gz file extension.
 output_file <- snakemake@output[["counts"]]
 dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
@@ -329,6 +414,11 @@ write_tsv(
   output_file
 )
 cat("\nSaved corrected counts:", output_file, "\n")
+
+
+###########
+# Cleanup #
+###########
 
 cat("\n=== ComBat-Seq Correction Complete ===\n")
 sink(type = "message")
