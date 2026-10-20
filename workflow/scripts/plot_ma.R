@@ -11,7 +11,7 @@
 # File:     workflow/scripts/plot_ma.R
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-09-21
-# Modified: 2026-10-15
+# Modified: 2026-10-20
 # License:  GNU Affero General Public License version 3 or later
 # Purpose:  MA plot R script for the bulk RNA-seq DGE (DESeq2 + GSEA)
 #           Snakemake workflow.
@@ -53,8 +53,6 @@
 ###########
 
 library(ggplot2)
-library(dplyr)
-library(readr)
 library(ggrepel)
 
 

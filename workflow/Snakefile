@@ -484,6 +484,7 @@ SHRINKABLE_CONTRASTS = [
   if contrast_is_shrinkable(spec)
 ]
 
+GENE_LABEL = config.get("gene_label", None)
 GENES_OF_INTEREST = config.get("genes_of_interest", None)
 GSEA_NAMES = list(config["gsea"].keys())
 GO_GSEA_NAMES = [
@@ -773,6 +774,8 @@ rule field_collinearity:
 rule plot_volcano:
   input:
     results = rules.deseq2_contrast.output.results,
+    gene_annotation = ( config.get("gene_annotation_tsv", [])
+                        if GENE_LABEL is not None else [] ),
     plot_input_lib = workflow.source_path("scripts/lib/plot_input.R"),
     # ^-- explicitly re-run upon code change
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
@@ -787,6 +790,7 @@ rule plot_volcano:
     color_up = config["colors"]["direction"]["up"],
     color_down = config["colors"]["direction"]["down"],
     color_none = config["colors"]["direction"]["none"],
+    gene_label = GENE_LABEL,
     genes_of_interest = GENES_OF_INTEREST,
   output:
     volcano =
@@ -798,7 +802,8 @@ rule plot_volcano:
 
 rule plot_ma:
   input:
-    results = rules.deseq2_contrast.output.results,
+    results = rules.plot_volcano.input.results,
+    gene_annotation = rules.plot_volcano.input.gene_annotation,
     plot_input_lib = rules.plot_volcano.input.plot_input_lib,
     # ^-- explicitly re-run upon code change
     plot_theme_lib = rules.plot_volcano.input.plot_theme_lib,
@@ -812,6 +817,7 @@ rule plot_ma:
     color_up = rules.plot_volcano.params.color_up,
     color_down = rules.plot_volcano.params.color_down,
     color_none = rules.plot_volcano.params.color_none,
+    gene_label = rules.plot_volcano.params.gene_label,
     genes_of_interest = rules.plot_volcano.params.genes_of_interest,
   output:
     ma = f"{OUTPUT_DIR}/deseq2/{{contrast}}.{{confounder_handling}}.ma_plot_{{lfc_type}}.pdf"

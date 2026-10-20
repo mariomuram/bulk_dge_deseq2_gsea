@@ -9,7 +9,7 @@
 # File:     workflow/scripts/lib/plot_input.R
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-09-21
-# Modified: 2026-10-15
+# Modified: 2026-10-20
 # License:  GNU Affero General Public License version 3 or later
 # Purpose:  Common MA/volcan plot input code helper R script for the bulk
 #           RNA-seq DGE (DESeq2 + GSEA) Snakemake workflow.
@@ -47,6 +47,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+###########
+# Imports #
+###########
+
+library(readr)
+library(dplyr)
+
 
 #############
 # Constants #
@@ -60,9 +67,11 @@ GENES_OF_INTEREST_FALLBACK_N <- 10L
 ##############
 
 deseq2_results <- snakemake@input[["results"]]
+gene_annotation <- snakemake@input[["gene_annotation"]]
 contrast_name <- snakemake@params[["contrast_name"]]
 lfc_type <- snakemake@params[["lfc_type"]]
 padj_threshold <- snakemake@params[["padj_threshold"]]
+gene_label <- snakemake@params[["gene_label"]]
 genes_of_interest <- snakemake@params[["genes_of_interest"]]
 color_up   <- snakemake@params[["color_up"]]
 color_down <- snakemake@params[["color_down"]]
@@ -71,8 +80,15 @@ color_none <- snakemake@params[["color_none"]]
 cat("Contrast:", contrast_name, "\n")
 cat("LFC type:", lfc_type, "\n")
 cat("padj threshold:", padj_threshold, "\n")
+cat("Gene label:", gene_label, "\n")
 cat("Genes of interest:", genes_of_interest, "\n")
 cat("Colors -- up:", color_up, " down:", color_down, " none:", color_none, "\n\n")
+
+if (is.null(gene_annotation) != is.null(gene_label)) {
+  stop("ERROR: Either both or neither of gene annotation and gene label",
+       "must be specified!")
+}
+if (is.null(gene_label)) { gene_label <- "gene_id" }
 
 
 #########
@@ -80,6 +96,37 @@ cat("Colors -- up:", color_up, " down:", color_down, " none:", color_none, "\n\n
 #########
 
 results_df <- read_tsv(deseq2_results, show_col_types = FALSE)
+
+if (gene_label != "gene_id") {
+  annotation_df <- read_tsv(gene_annotation, show_col_types = FALSE) %>%
+                   select(all_of(c("gene_id", gene_label)))
+}
+
+
+###############
+# Gene labels #
+###############
+
+if (exists("annotation_df")) {
+  if (!(gene_label %in% colnames(annotation_df))) {
+    stop("ERROR: Gene annotation does not contain gene label column!")
+  }
+  results_df <- left_join(results_df, annotation_df, by = "gene_id")
+  rm(annotation_df)
+  n_missing_labels <- sum(is.na(pull(results_df, gene_label)))
+  if (n_missing_labels) {
+    cat("WARNING: ", n_missing_labels, " genes have no matching label.\n",
+        "Falling back to gene IDs for those genes.\n")
+    results_df <- mutate(
+      results_df, "{gene_label}" := coalesce(.data[[gene_label]], gene_id)
+    )
+  }
+}
+
+
+##############
+# LFC labels #
+##############
 
 lfc_col <- if (lfc_type == "shrunk") "log2FoldChange_shrunk" else "log2FoldChange"
 if (!(lfc_col %in% colnames(results_df))) {
@@ -163,7 +210,8 @@ results_df <- results_df %>%
 results_df <- results_df %>%
   # Note: empty string rather than `NA` to ensure unlabeled points are
   #  considered for `ggrepel`'s repulsion.
-  mutate(label = ifelse(gene_id %in% genes_of_interest, gene_id, ""))
+  mutate(label = ifelse(gene_id %in% genes_of_interest,
+                        .data[[gene_label]], ""))
 
 
 ##############
