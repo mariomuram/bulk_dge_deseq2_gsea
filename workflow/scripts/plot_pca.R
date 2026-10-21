@@ -8,7 +8,7 @@
 # About #
 #########
 
-# File:     workflow/scripts/pca_plot.R
+# File:     workflow/scripts/plot_pca.R
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-10-01
 # Modified: 2026-10-21
@@ -73,6 +73,14 @@ cat("=== QC: PCA Plot ===\n")
 cat("Timestamp:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
 
 
+#############
+# Constants #
+#############
+
+# Default prefix for principal component columns in PCA scores data frame.
+pc_prefix <- "PC"
+
+
 ###############
 # Shared code #
 ###############
@@ -84,6 +92,9 @@ source(snakemake@input[["plot_theme_lib"]])
 # Parameters #
 ##############
 
+pcs <- strsplit(snakemake@wildcards[["PCs"]], "_")[[1]]
+pca_x <- as.integer(sub("^PC", "", pcs[1]))
+pca_y <- as.integer(sub("^PC", "", pcs[2]))
 dds <- snakemake@input[["dds_rds"]]
 scores_file <- snakemake@input[["scores"]]
 correction <- snakemake@wildcards[["correction"]]
@@ -97,8 +108,6 @@ label_var <- snakemake@params[["label"]]
 palette <- snakemake@params[["palette"]]
 title_suffix <- snakemake@params[["title_suffix"]]
 plot_file <- snakemake@output[["pca"]]
-pca_x <- snakemake@params[["pca_x"]]
-pca_y <- snakemake@params[["pca_y"]]
 cat("Correction stage:", correction, "\n")
 cat("Plotting with: color =", color_var, ", shape =", shape_var, "\n\n")
 
@@ -119,6 +128,17 @@ cat("Loaded dds:", ncol(dds), "samples,", nrow(dds), "genes\n")
 percent_var <- round(100 * pca$sdev^2 / sum(pca$sdev^2))
 
 
+################
+# Checking PCs #
+################
+
+#Checking that PCs requested are within the range of PCs calculated.
+if (pca_x > ncol(pca$x) || pca_y > ncol(pca$x)) {
+  stop("Requested PCs (", pca_x, ", ", pca_y, ") exceed number of computed PCs (",
+       ncol(pca$x), ").")
+} 
+
+
 ####################
 # PCA scatter plot #
 ####################
@@ -133,7 +153,7 @@ fields <- unique(c(color_var, shape_var, label_var))
 pca_data <- cbind(
   setNames(
     as.data.frame(pca$x[, c(pca_x, pca_y), drop=FALSE]),
-    paste0("PC", c(pca_x, pca_y))
+    paste0(pc_prefix, c(pca_x, pca_y))
   ),
   as.data.frame(colData(dds))[
     rownames(pca$x), fields, drop = FALSE])
@@ -146,8 +166,8 @@ pca_plot <- ggplot(pca_data,
   scale_color_brewer(palette = palette) +
   labs(
     title = paste0("PCA", title_suffix),
-    x = paste0("PC", pca_x, ": ", percent_var[pca_x], "% variance"),
-    y = paste0("PC", pca_y, ": ", percent_var[pca_y], "% variance"),
+    x = paste0(pc_prefix, pca_x, ": ", percent_var[pca_x], "% variance"),
+    y = paste0(pc_prefix, pca_y, ": ", percent_var[pca_y], "% variance"),
     color = color_label, shape = shape_label
   )
 if (!is.null(label_var)) {

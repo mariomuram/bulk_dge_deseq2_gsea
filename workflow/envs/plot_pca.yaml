@@ -38,11 +38,8 @@ channels:
   - bioconda
   - nodefaults
 
-
-############
-# Packages #
-############
-
 dependencies:
   - r-base
-  - bioconductor-deseq2
+  - r-ggplot2
+  - r-ggrepel
+  - bioconductor-deseq2 #This is needed to use colData() function to extract the sample information from the DESeqDataSet object

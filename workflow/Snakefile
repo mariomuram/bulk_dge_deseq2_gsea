@@ -530,7 +530,7 @@ wildcard_constraints:
   confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
-
+  PCs = r"PC([1-9][0-9]*)_PC(?!\1$)[1-9][0-9]*" 
 
 #########
 # Rules #
@@ -547,8 +547,14 @@ rule all:
            contrast=CONTRAST_NAMES,
            confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
     # QC plots
-    expand(f"{OUTPUT_DIR}/qc/pca_plot_{{correction}}.pdf",
-           correction=ACTIVE_CORRECTION_METHODS_QC),
+    expand(f"{OUTPUT_DIR}/qc/plot_pca_{{correction}}_{{PCs}}.pdf",
+           zip,
+           correction=[c for c, pairs in config["pca"]["combinations"].items()
+                       if c in ACTIVE_CORRECTION_METHODS_QC
+                       for _ in (pairs or ["PC1_PC2"])],
+           PCs=[pc for c, pairs in config["pca"]["combinations"].items()
+                if c in ACTIVE_CORRECTION_METHODS_QC
+                for pc in (pairs or ["PC1_PC2"])]),
     expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}_heatmap.pdf",
            correction=ACTIVE_CORRECTION_METHODS_QC),
     f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
@@ -711,31 +717,28 @@ def _assay_for_pca(wildcards):
     return f"{OUTPUT_DIR}/deseq2/{handling}_vst_blind.rds"
   return f"{OUTPUT_DIR}/deseq2/vst_corrected_{wildcards.correction}.rds"
 
-rule pca_analysis:
+rule analysis_pca:
   input:
     dds_rds = QC_DDS,
     assay = _assay_for_pca,
 
   output:
-    scores = f"{OUTPUT_DIR}/qc/pca_analysis_{{correction}}_scores.rds",
+    scores = f"{OUTPUT_DIR}/qc/analysis_pca_{{correction}}_scores.rds",
+  log: f"{OUTPUT_DIR}/logs/analysis_pca_{{correction}}.log"
+  conda: "envs/analysis_pca.yaml"
+  script: "scripts/analysis_pca.R"
 
-  log: f"{OUTPUT_DIR}/logs/pca_analysis_{{correction}}.log"
-  conda: "envs/pca_analysis.yaml"
-  script: "scripts/pca_analysis.R"
-
-rule pca_plot:
+rule plot_pca:
   input:
     dds_rds = QC_DDS,
-    scores = rules.pca_analysis.output.scores,
+    scores = rules.analysis_pca.output.scores,
     plot_theme_lib = workflow.source_path("scripts/lib/plot_theme.R"),
     # ^-- explicitly re-run upon code change
 
   output:
-    pca = f"{OUTPUT_DIR}/qc/pca_plot_{{correction}}.pdf"
+    pca = f"{OUTPUT_DIR}/qc/plot_pca_{{correction}}_{{PCs}}.pdf"
 
   params:
-    pca_x =config["pca"].get("x", 1),
-    pca_y =config["pca"].get("y", 2),
     color = config["pca"]["color"],
     shape = config["pca"]["shape"],
     label = PCA_LABEL_FIELD,
@@ -743,16 +746,15 @@ rule pca_plot:
     title_suffix = lambda wc: (
       "" if wc.correction == "uncorrected" else f" ({wc.correction}-corrected)"
     ),
-
-  log: f"{OUTPUT_DIR}/logs/pca_plot_{{correction}}.log"
-  conda: "envs/pca_plot.yaml"
-  script: "scripts/pca_plot.R"
+  log: f"{OUTPUT_DIR}/logs/plot_pca_{{correction}}_{{PCs}}.log"
+  conda: "envs/plot_pca.yaml"
+  script: "scripts/plot_pca.R"
 
 rule pc_field_association:
   input:
     dds_rds = QC_DDS,
-    pca_scores = rules.pca_analysis.output.scores,
-    plot_theme_lib = rules.pca_plot.input.plot_theme_lib,
+    pca_scores = rules.analysis_pca.output.scores,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = workflow.source_path("scripts/lib/association.R"),
     heatmap_theme_lib = workflow.source_path("scripts/lib/heatmap_theme.R"),
     # ^-- explicitly re-run upon code change
@@ -771,7 +773,7 @@ rule pc_field_association:
 rule field_collinearity:
   input:
     dds_rds = QC_DDS,
-    plot_theme_lib = rules.pca_plot.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = rules.pc_field_association.input.association_lib,
     heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
     # ^-- explicitly re-run upon code change
@@ -791,7 +793,7 @@ rule plot_volcano:
     results = rules.deseq2_contrast.output.results,
     plot_input_lib = workflow.source_path("scripts/lib/plot_input.R"),
     # ^-- explicitly re-run upon code change
-    plot_theme_lib = rules.pca_plot.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
     plot_title_lib = workflow.source_path("scripts/lib/plot_title.R"),
     # ^-- explicitly re-run upon code change
@@ -888,7 +890,7 @@ rule gsea_postprocess_go:
   wildcard_constraints: gsea = "|".join(GO_GSEA_NAMES)
   input:
     gsea_results_rds = rules.gsea_run_go.output.gsea_results_rds,
-    plot_theme_lib = rules.pca_plot.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     # ^-- explicitly re-run upon code change
     plot_title_lib = rules.plot_volcano.input.plot_title_lib,
     # ^-- explicitly re-run upon code change
@@ -941,7 +943,7 @@ rule aggregate_gsea_across_contrasts:
       contrast=CONTRAST_NAMES, gsea=wc.gsea,
       confounder_handling=wc.confounder_handling
     ),
-    plot_theme_lib = rules.pca_plot.input.plot_theme_lib,
+    plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     heatmap_theme_lib = rules.pc_field_association.input.heatmap_theme_lib,
     plot_title_lib = rules.plot_volcano.input.plot_title_lib,
     # ^-- explicitly re-run upon code change

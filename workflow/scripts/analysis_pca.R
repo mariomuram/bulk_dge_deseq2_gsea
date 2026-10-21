@@ -8,7 +8,7 @@
 # About #
 #########
 
-# File:     workflow/scripts/pca_analysis.R
+# File:     workflow/scripts/analysis_pca.R
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-10-01
 # Modified: 2026-10-21
