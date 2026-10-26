@@ -38,6 +38,11 @@ channels:
   - bioconda
   - nodefaults
 
+
+############
+# Packages #
+############
+
 dependencies:
   - r-base
   - r-ggplot2

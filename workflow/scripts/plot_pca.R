@@ -92,24 +92,22 @@ source(snakemake@input[["plot_theme_lib"]])
 # Parameters #
 ##############
 
-pcs <- strsplit(snakemake@wildcards[["PCs"]], "_")[[1]]
+pcs <- strsplit(snakemake@wildcards[["pcs"]], "_")[[1]]
 pca_x <- as.integer(sub("^PC", "", pcs[1]))
 pca_y <- as.integer(sub("^PC", "", pcs[2]))
 dds <- snakemake@input[["dds_rds"]]
 scores_file <- snakemake@input[["scores"]]
 correction <- snakemake@wildcards[["correction"]]
-color_var <- snakemake@params[["color"]]
-color_label <- unname(color_var[[1]])
-color_var <- names(color_var)[1]
-shape_var <- snakemake@params[["shape"]]
-shape_label <- unname(shape_var[[1]])
-shape_var <- names(shape_var)[1]
+colour_config <- snakemake@params[["colour_setting"]]
+colour_var <- snakemake@params[["colour_field"]]
+colour_label <- snakemake@params[["colour_label"]]
+shape_var <- snakemake@params[["shape"]][["field"]]
+shape_label <- snakemake@params[["shape"]][["label"]]
 label_var <- snakemake@params[["label"]]
-palette <- snakemake@params[["palette"]]
 title_suffix <- snakemake@params[["title_suffix"]]
 plot_file <- snakemake@output[["pca"]]
 cat("Correction stage:", correction, "\n")
-cat("Plotting with: color =", color_var, ", shape =", shape_var, "\n\n")
+cat("Plotting with: color =", colour_var, ", shape =", shape_var, "\n\n")
 
 
 #########
@@ -133,9 +131,10 @@ percent_var <- round(100 * pca$sdev^2 / sum(pca$sdev^2))
 ################
 
 #Checking that PCs requested are within the range of PCs calculated.
-if (pca_x > ncol(pca$x) || pca_y > ncol(pca$x)) {
+n_pcs <- ncol(pca$x)
+if (max(pca_x, pca_y) > n_pcs) {
   stop("Requested PCs (", pca_x, ", ", pca_y, ") exceed number of computed PCs (",
-       ncol(pca$x), ").")
+       n_pcs, ").")
 } 
 
 
@@ -143,33 +142,76 @@ if (pca_x > ncol(pca$x) || pca_y > ncol(pca$x)) {
 # PCA scatter plot #
 ####################
 
-# TODO: Allow configuring which PCs are plotted (default: PC1/PC2).
-# Consider splitting PCA computation (above) into separate script to allow
-# plotting severale PC pairs from the same PCA without re-computing the PCA
-# by calling the PCA script once and this plotting script several times
-# with different parameters from Snakemake.
-fields <- unique(c(color_var, shape_var, label_var))
+fields <- unique(c(colour_var, shape_var, label_var))
 
 pca_data <- cbind(
   setNames(
-    as.data.frame(pca$x[, c(pca_x, pca_y), drop=FALSE]),
+    as.data.frame(pca$x[, c(pca_x, pca_y), drop = FALSE]),
     paste0(pc_prefix, c(pca_x, pca_y))
   ),
   as.data.frame(colData(dds))[
     rownames(pca$x), fields, drop = FALSE])
 
+###For the future this should be checked and changed
+# Try to convert the selected colour variable to numeric
+colour_values <- pca_data[[colour_var]]
+
+numeric_values <- suppressWarnings(
+  as.numeric(as.character(colour_values))
+)
+
+# Determine whether the variable can be treated as continuous
+is_continuous <- (
+  any(!is.na(colour_values)) &&
+  all(!is.na(numeric_values) | is.na(colour_values))
+)
+
+# Convert the variable if it can be treated as continuous
+if (is_continuous) {
+  pca_data[[colour_var]] <- numeric_values
+}
+
 pca_plot <- ggplot(pca_data,
                    aes(x = .data[[paste0("PC", pca_x)]], y = .data[[paste0("PC", pca_y)]],
-                   color = .data[[color_var]], 
+                   color = .data[[colour_var]], 
                    shape = .data[[shape_var]])) +
   geom_point(size = default_point_size, alpha = 0.8) +
-  scale_color_brewer(palette = palette) +
   labs(
     title = paste0("PCA", title_suffix),
     x = paste0(pc_prefix, pca_x, ": ", percent_var[pca_x], "% variance"),
     y = paste0(pc_prefix, pca_y, ": ", percent_var[pca_y], "% variance"),
-    color = color_label, shape = shape_label
+    color = colour_label, shape = shape_label
   )
+
+# Select the color scale depending on the variable type
+if (is_continuous) {
+  if ("palette" %in% names(colour_config)) {
+    pca_plot <- pca_plot + scale_color_distiller(palette = colour_config[["palette"]])
+  } else {
+    if ("mid" %in% names(colour_config)) {
+      pca_plot <- pca_plot + scale_color_gradient2(
+        low = colour_config[["low"]],
+        mid = colour_config[["mid"]],
+        high = colour_config[["high"]],
+        midpoint = median(pca_data[[colour_var]], na.rm = TRUE)
+      )
+    } else {
+      pca_plot <- pca_plot + scale_color_gradient(
+        low = colour_config[["low"]],
+        high = colour_config[["high"]]
+      )
+    }
+  }
+} else {
+  if ("palette" %in% names(colour_config)) {
+    pca_plot <- pca_plot +
+      scale_color_brewer(palette = colour_config[["palette"]])
+  } else {
+    pca_plot <- pca_plot +
+      scale_color_brewer(palette = "Dark2")  # Default palette for categorical variables
+  }
+}
+
 if (!is.null(label_var)) {
   library(ggrepel)
   pca_plot <- pca_plot +
