@@ -367,6 +367,79 @@ elif COMBAT_SEQ_STRATEGY == "preserve_extra":
 else:  # composite: one batch out of all (necessarily discrete) confounders
   COMBAT_SEQ_RESIDUAL_CONFOUNDERS = []
 
+# --- Retrieve the specific plots to create from the config file -------
+
+for c in ACTIVE_CORRECTION_METHODS_QC:
+  if c not in config["pca"].setdefault("pc_pairs", {}):
+    config["pca"]["pc_pairs"][c] = ["PC1_PC2"]  # default if not specified
+
+PCS_TO_PLOT_BY_CORRECTION_METHOD = [
+  pca_plot for correction, pcs in config["pca"]["pc_pairs"].items()
+  for pca_plot in expand(
+    f"{OUTPUT_DIR}/qc/plot_pca_{{correction}}_{{pcs}}.pdf",
+    correction=correction, pcs=pcs,
+  )
+]
+
+# --- Colour and palette settings for the gradient pca_plot -------
+
+if "color" not in config["pca"] and "colour" not in config["pca"]:
+  raise ValueError(
+    f"`pca.colour/color` is not specified in the config file. Please specify a colour variable for PCA plots."
+  )  
+else:
+  if config["pca"].get("colour", None) is not None and config["pca"].get("color", None) is not None:
+    raise ValueError(
+      f"`pca.colour` and `pca.color` are both specified in the config file. Please specify only one of them."
+    )
+  else:
+    colour_or_color_config = config["pca"].get("colour", {}) or config["pca"].get("color", {})
+    pca_colour_setting = {}
+    if colour_or_color_config.get("field", None) is None:
+      raise ValueError(
+        f"`pca.colour/color` is specified but no field is provided. Please specify a field for PCA plots."
+      )
+    else:
+      if "label" not in colour_or_color_config:
+        raise ValueError(
+          f"`pca.colour/color.label` is not specified in the config file. Please specify a label for PCA plots."
+        )
+      else:
+        if "palette" in colour_or_color_config:
+          if len({"low", "mid", "high"}.intersection(colour_or_color_config)):
+            raise ValueError(
+              f"`pca.colour.palette` is specified but one or more parameters are also specified. Please specify either a palette or the individual parameters."
+            )
+          else:
+            pca_colour_setting["palette"] = colour_or_color_config["palette"]
+        else:
+          pca_colour_setting["high"] = colour_or_color_config.get("high","red")
+          pca_colour_setting["low"] = colour_or_color_config.get("low","blue")
+   
+          if "mid" in colour_or_color_config:
+            pca_colour_setting["mid"] = colour_or_color_config["mid"]
+
+# --- Check if shape config exists for PCA plots -------
+
+if "shape" not in config["pca"]:
+  raise ValueError(
+    f"`pca.shape` is not specified in the config file. Please specify a shape variable for PCA plots."
+  )
+else:
+  if config["pca"].get("shape", None) is None:
+    raise ValueError(
+      f"`pca.shape` is specified but no variable is provided. Please specify a field and a label for PCA plots."
+    )
+  else:
+    if "field" not in config["pca"]["shape"]:
+      raise ValueError(
+        f"`pca.shape.field` is not specified in the config file. Please specify a field for PCA plots."
+      )
+    if "label" not in config["pca"]["shape"]:
+      raise ValueError(
+        f"`pca.shape.label` is not specified in the config file. Please specify a label for PCA plots."
+      )
+
 # --- Resolve contrasts: numerator/denominator sugar -> groups -------
 
 ALL_CONDITIONS = set(SAMPLES_INFO.values())
@@ -531,7 +604,7 @@ wildcard_constraints:
   confounder_handling = "|".join(ACTIVE_CONFOUNDER_HANDLING_METHODS),
   lfc_type = "unshrunk|shrunk",
   gsea = "|".join(re.escape(a) for a in GSEA_NAMES),
-
+  pcs = r"PC([1-9][0-9]*)_PC(?!\1$)[1-9][0-9]*"
 
 #########
 # Rules #
@@ -548,8 +621,7 @@ rule all:
            contrast=CONTRAST_NAMES,
            confounder_handling=ACTIVE_CONFOUNDER_HANDLING_METHODS),
     # QC plots
-    expand(f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
-           correction=ACTIVE_CORRECTION_METHODS_QC),
+    PCS_TO_PLOT_BY_CORRECTION_METHOD,
     expand(f"{OUTPUT_DIR}/qc/pc_field_association_{{correction}}_heatmap.pdf",
            correction=ACTIVE_CORRECTION_METHODS_QC),
     f"{OUTPUT_DIR}/qc/field_collinearity_heatmap.pdf",
@@ -712,31 +784,44 @@ def _assay_for_pca(wildcards):
     return f"{OUTPUT_DIR}/deseq2/{handling}_vst_blind.rds"
   return f"{OUTPUT_DIR}/deseq2/vst_corrected_{wildcards.correction}.rds"
 
-rule plot_pca:
+rule analysis_pca:
   input:
     dds_rds = QC_DDS,
     assay = _assay_for_pca,
+
+  output:
+    scores = f"{OUTPUT_DIR}/qc/analysis_pca_{{correction}}_scores.rds",
+  log: f"{OUTPUT_DIR}/logs/analysis_pca_{{correction}}.log"
+  conda: "envs/analysis_pca.yaml"
+  script: "scripts/analysis_pca.R"
+
+rule plot_pca:
+  input:
+    dds_rds = QC_DDS,
+    scores = rules.analysis_pca.output.scores,
     plot_theme_lib = workflow.source_path("scripts/lib/plot_theme.R"),
     # ^-- explicitly re-run upon code change
+
   output:
-    pca = f"{OUTPUT_DIR}/qc/pca_{{correction}}.pdf",
-    scores = f"{OUTPUT_DIR}/qc/pca_{{correction}}_scores.rds",
+    pca = f"{OUTPUT_DIR}/qc/plot_pca_{{correction}}_{{pcs}}.pdf"
+
   params:
-    color = config["pca"]["color"],
+    colour_setting = pca_colour_setting,
+    colour_field = config["pca"]["colour"]["field"],
+    colour_label = config["pca"]["colour"].get("label", config["pca"]["colour"]["field"]),
     shape = config["pca"]["shape"],
     label = PCA_LABEL_FIELD,
-    palette = config["pca"].get("palette", "Dark2"),
     title_suffix = lambda wc: (
       "" if wc.correction == "uncorrected" else f" ({wc.correction}-corrected)"
     ),
-  log: f"{OUTPUT_DIR}/logs/plot_pca_{{correction}}.log"
+  log: f"{OUTPUT_DIR}/logs/plot_pca_{{correction}}_{{pcs}}.log"
   conda: "envs/plot_pca.yaml"
   script: "scripts/plot_pca.R"
 
 rule pc_field_association:
   input:
     dds_rds = QC_DDS,
-    pca_scores = rules.plot_pca.output.scores,
+    pca_scores = rules.analysis_pca.output.scores,
     plot_theme_lib = rules.plot_pca.input.plot_theme_lib,
     association_lib = workflow.source_path("scripts/lib/association.R"),
     heatmap_theme_lib = workflow.source_path("scripts/lib/heatmap_theme.R"),
