@@ -9,7 +9,7 @@
 # File:     workflow/Snakefile
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-08-24
-# Modified: 2026-10-15
+# Modified: 2026-10-29
 # License:  GNU Affero General Public License version 3 or later
 # Purpose:  Main Snakefile for the bulk RNA-seq DGE (DESeq2 + GSEA)
 #           Snakemake workflow.

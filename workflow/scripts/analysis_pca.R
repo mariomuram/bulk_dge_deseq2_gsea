@@ -11,7 +11,7 @@
 # File:     workflow/scripts/analysis_pca.R
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-10-01
-# Modified: 2026-10-21
+# Modified: 2026-10-29
 # License:  GNU Affero General Public License version 3 or later
 # Purpose:  PCA analysis R script for the bulk RNA-seq DGE (DESeq2 + GSEA)
 #           Snakemake workflow.

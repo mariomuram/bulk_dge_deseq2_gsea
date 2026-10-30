@@ -9,7 +9,7 @@
 # File:     workflow/envs/plot_pca.yaml
 # Author:   Marcel Schilling <mschilling@idibell.cat>
 # Created:  2026-10-01
-# Modified: 2026-10-15
+# Modified: 2026-10-29
 # License:  GNU All-Permissive License
 # Purpose:  PCA plot environment YAML file for the bulk RNA-seq DGE (DESeq2
 #           + GSEA) Snakemake workflow.
