@@ -151,8 +151,8 @@ if SAMPLE_METADATA is not None:
   with open(
     SAMPLE_METADATA, "r", newline=""
   ) as metadata_file:
-      reader = csv.reader(metadata_file, delimiter="\t")
-      metadata_header = next(reader, [])
+    reader = csv.reader(metadata_file, delimiter="\t")
+    metadata_header = next(reader, [])
 
     # Check that the sample ID column exists
     if "sample_id" not in metadata_header:
